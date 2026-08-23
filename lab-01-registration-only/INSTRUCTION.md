@@ -31,6 +31,16 @@ runtime binding.
 - Hosting workload identity
 - Control of the Python process
 
+## How to use `expected-output.md`
+
+Keep [`expected-output.md`](expected-output.md) open while you run the lab.
+After each observation, compare only the safe result and its meaning.
+
+The file is an evidence guide, not a source-code solution. It omits generated
+identifiers, credentials, and environment-specific values. If your result is
+different, inspect the current CLI plan and tenant state. Do not change the
+environment only to make it match the example.
+
 ## Components
 
 | Component | Responsibility in this lab |

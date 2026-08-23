@@ -29,6 +29,16 @@ governance.
 - Microsoft 365 channel invocation
 - Runtime lifecycle control
 
+## How to use `expected-output.md`
+
+Keep [`expected-output.md`](expected-output.md) open while you run the lab.
+After each observation, compare only the safe result and its meaning.
+
+The file is an evidence guide, not a source-code solution. It omits dynamic
+trace and span identifiers. If your output is different, check the
+observability switches and exporter configuration before you compare with the
+solution.
+
 ## Components
 
 | Component | Responsibility in this lab |

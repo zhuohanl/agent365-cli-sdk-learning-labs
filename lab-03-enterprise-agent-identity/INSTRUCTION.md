@@ -36,6 +36,17 @@ tool.
 - Control of the model, prompt, every tool, or Python process
 - Cryptographic JWT validation by the local validator
 
+## How to use `expected-output.md`
+
+Keep [`expected-output.md`](expected-output.md) open while you run the lab.
+After each checkpoint, compare the safe output categories with that file.
+
+The file is an evidence and interpretation guide, not a source-code solution.
+It never contains tokens or environment identifiers. Permission-dependent
+results can differ. For example, the manager-role probe is expected to be
+denied when `AgentIdentity.CreateAsManager` is absent. Record the difference;
+do not grant a permission only to make the output match.
+
 ## Components
 
 | Component | Responsibility in this lab |
