@@ -50,7 +50,7 @@ tool.
 ## Prerequisites
 
 - Complete Lab 1 and keep its disposable registration.
-- Keep the generated config files only in the ignored Lab 1 workspace.
+- Keep the generated config file only in the ignored Lab 1 workspace.
 - Keep the blueprint credential in an approved secret store.
 - Complete Lab 2 or understand its local observability result.
 - Sign in to Azure CLI for the test tenant.
@@ -101,57 +101,303 @@ Separate these two lists:
 This lab requests an app-only token. Microsoft Graph checks its `roles` claim,
 not its delegated `scp` claim.
 
-## Checkpoint A: Token acquisition outside the runtime
+## Checkpoint A: Acquire a token outside the runtime
 
-### 4. Add the sidecar
+Checkpoint A uses only the sidecar and a validator:
 
-Create `sidecar/compose.yaml` from the solution. Important settings:
+```text
+validator -> sidecar -> Entra ID -> resource token
 
-```yaml
-DownstreamApis__graph-app__Scopes__0: https://graph.microsoft.com/.default
-DownstreamApis__graph-app__RequestAppToken: "true"
+agent.py is not involved
+Microsoft Graph is not called
 ```
 
-`.default` includes permissions that are already granted and consented. It
-does not grant a new permission.
+### 4. Create the complete Compose file
 
-The local port must stay restricted:
+Create the directory:
 
-```yaml
-ports:
-  - "127.0.0.1:5000:5000"
+```powershell
+New-Item -ItemType Directory .\sidecar
 ```
 
-### 5. Add the safe validator
+Create `sidecar/compose.yaml`:
 
-Create `sidecar/validate.py` from the solution. It reports only booleans and a
-resource category.
+```yaml
+services:
+  sidecar:
+    image: mcr.microsoft.com/entra-sdk/auth-sidecar:1.0.0-azurelinux3.0-distroless
+    environment:
+      AzureAd__Instance: https://login.microsoftonline.com/
+      AzureAd__TenantId: ${TENANT_ID}
+      AzureAd__ClientId: ${BLUEPRINT_APP_ID}
+      AzureAd__ClientCredentials__0__SourceType: ClientSecret
+      AzureAd__ClientCredentials__0__ClientSecret: ${BLUEPRINT_CLIENT_SECRET}
+      DownstreamApis__graph-app__BaseUrl: https://graph.microsoft.com/v1.0/
+      DownstreamApis__graph-app__Scopes__0: https://graph.microsoft.com/.default
+      DownstreamApis__graph-app__RequestAppToken: "true"
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5000
+      AllowedHosts: "*"
+    networks:
+      - identity-lab
+    ports:
+      - "127.0.0.1:5000:5000"
 
-The validator decodes the JWT payload only to support this controlled
-experiment. It does not verify the JWT signature. A protected API, such as
-Microsoft Graph, is the enforcement point that validates the token.
+  validator:
+    image: mcr.microsoft.com/azure-cli:2.77.0
+    depends_on:
+      - sidecar
+    environment:
+      SIDECAR_URL: http://sidecar:5000
+      AGENT_CLIENT_ID: ${AGENT_CLIENT_ID}
+    volumes:
+      - ./validate.py:/validate.py:ro
+    command: ["python3", "/validate.py"]
+    networks:
+      - identity-lab
 
-### 6. Add the run script
+networks:
+  identity-lab:
+    driver: bridge
+```
 
-Create `sidecar/run.ps1` from the solution.
+Read the boundaries in this file:
 
-The script:
+- `AzureAd__ClientId` is the blueprint application ID.
+- `AzureAd__ClientCredentials__0__ClientSecret` proves that the sidecar holds
+  the blueprint credential.
+- `AGENT_CLIENT_ID` is the Enterprise Agent Identity that the validator asks
+  the sidecar to represent.
+- `.default` includes permissions that are already granted and consented. It
+  does not grant a new permission.
+- `RequestAppToken: "true"` selects an app-only token. Graph will inspect
+  application roles, not delegated scopes.
+- The host port is restricted to `127.0.0.1`. Do not change it to `5000:5000`.
 
-1. Reads generated identifiers without printing them.
-2. Prompts for the blueprint secret.
-3. Starts a fixed sidecar image.
-4. Runs the validator.
-5. Removes the secret and unrelated identifiers from the parent environment.
-6. Starts the Python runtime.
-7. Cleans the containers, network, and environment in a `finally` block.
+### 5. Create the complete safe validator
 
-Run it:
+Create `sidecar/validate.py`:
+
+```python
+import base64
+import json
+import os
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+SIDECAR_URL = os.environ["SIDECAR_URL"]
+AGENT_CLIENT_ID = os.environ["AGENT_CLIENT_ID"]
+
+
+def decode_payload(authorization_header: str) -> dict[str, object]:
+    if not authorization_header.startswith("Bearer "):
+        raise ValueError("Unexpected authorization scheme")
+
+    token = authorization_header.removeprefix("Bearer ")
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Unexpected JWT shape")
+
+    payload = parts[1]
+    padded = payload + "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(padded))
+
+
+def audience_category(audience: object) -> str:
+    if isinstance(audience, str) and audience in {
+        "https://graph.microsoft.com",
+        "00000003-0000-0000-c000-000000000000",
+    }:
+        return "microsoft-graph"
+    return "other"
+
+
+def request_token() -> str | None:
+    query = urllib.parse.urlencode({"AgentIdentity": AGENT_CLIENT_ID})
+    url = (
+        f"{SIDECAR_URL}/AuthorizationHeaderUnauthenticated/graph-app"
+        f"?{query}"
+    )
+
+    for _ in range(12):
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={"Host": "localhost"},
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                body = json.loads(response.read())
+                value = body.get("authorizationHeader")
+                return value if isinstance(value, str) else None
+        except (
+            json.JSONDecodeError,
+            TimeoutError,
+            urllib.error.URLError,
+        ):
+            time.sleep(5)
+
+    return None
+
+
+authorization_header = request_token()
+print(f"token_acquired={bool(authorization_header)}")
+
+if not authorization_header:
+    print("VALIDATION_COMPLETE=False")
+    raise SystemExit(1)
+
+try:
+    claims = decode_payload(authorization_header)
+except (ValueError, KeyError, json.JSONDecodeError):
+    print("jwt_decodable=False")
+    print("VALIDATION_COMPLETE=False")
+    raise SystemExit(1)
+
+roles = claims.get("roles", [])
+has_manager_role = (
+    isinstance(roles, list)
+    and "AgentIdentity.CreateAsManager" in roles
+)
+token_identity = claims.get("appid") or claims.get("azp")
+
+print("jwt_decodable=True")
+print(f"idtyp_is_app={claims.get('idtyp') == 'app'}")
+print(f"identity_matches_requested_agent={token_identity == AGENT_CLIENT_ID}")
+print(f"audience_category={audience_category(claims.get('aud'))}")
+print(f"has_expiry_claim={'exp' in claims}")
+print(f"has_create_as_manager_role={has_manager_role}")
+print("VALIDATION_COMPLETE=True")
+```
+
+This program never prints the authorization header, token, full claims,
+identifiers, or role list. It prints only safe categories and booleans.
+
+The validator decodes the JWT payload only for this controlled experiment. It
+does not verify the JWT signature. A protected API, such as Microsoft Graph,
+is the enforcement point that validates the token.
+
+### 6. Create the Checkpoint A run script
+
+Create `sidecar/run.ps1` with this Checkpoint A version. It starts the sidecar,
+runs only the validator, and removes the containers. It does not start
+`agent.py`.
+
+```powershell
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$labRoot = Split-Path -Parent $PSScriptRoot
+$composeFile = Join-Path $PSScriptRoot 'compose.yaml'
+$generatedPath = Join-Path $labRoot 'a365.generated.config.json'
+
+$secureSecret = $null
+$secretPointer = [IntPtr]::Zero
+
+function Get-RequiredConfigValue {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Config,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    $property = $Config.PSObject.Properties[$Name]
+    if (
+        $null -eq $property -or
+        [string]::IsNullOrWhiteSpace([string]$property.Value)
+    ) {
+        throw (
+            "$Name not found in a365.generated.config.json. " +
+            'Check the field names written by the installed CLI. ' +
+            'Do not paste their values.'
+        )
+    }
+
+    return [string]$property.Value
+}
+
+try {
+    $generated = Get-Content $generatedPath -Raw | ConvertFrom-Json
+
+    $tenantId = az account show --query tenantId --output tsv
+    if (
+        $LASTEXITCODE -ne 0 -or
+        [string]::IsNullOrWhiteSpace($tenantId)
+    ) {
+        throw 'Could not resolve the tenant from the active Azure CLI account.'
+    }
+
+    $env:TENANT_ID = [string]$tenantId
+    $env:BLUEPRINT_APP_ID = Get-RequiredConfigValue `
+        -Config $generated `
+        -Name 'agentBlueprintId'
+    $env:AGENT_CLIENT_ID = Get-RequiredConfigValue `
+        -Config $generated `
+        -Name 'agenticAppId'
+
+    $secureSecret = Read-Host `
+        'Enter the saved blueprint client secret' `
+        -AsSecureString
+    $secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR(
+        $secureSecret
+    )
+    $env:BLUEPRINT_CLIENT_SECRET =
+        [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPointer)
+
+    $required = @(
+        $env:TENANT_ID
+        $env:BLUEPRINT_APP_ID
+        $env:BLUEPRINT_CLIENT_SECRET
+        $env:AGENT_CLIENT_ID
+    )
+
+    if ($required.Where({ [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) {
+        throw 'One or more required local values are missing.'
+    }
+
+    docker compose -f $composeFile up -d sidecar
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The sidecar did not start.'
+    }
+
+    docker compose -f $composeFile run --rm validator
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The validator did not complete successfully.'
+    }
+}
+finally {
+    # Compose needs values during interpolation, but cleanup does not use
+    # these placeholders to authenticate.
+    $env:TENANT_ID = 'cleanup-placeholder'
+    $env:BLUEPRINT_APP_ID = 'cleanup-placeholder'
+    $env:BLUEPRINT_CLIENT_SECRET = 'cleanup-placeholder'
+    docker compose -f $composeFile down --remove-orphans
+
+    Remove-Item Env:TENANT_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:BLUEPRINT_APP_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:BLUEPRINT_CLIENT_SECRET -ErrorAction SilentlyContinue
+    Remove-Item Env:AGENT_CLIENT_ID -ErrorAction SilentlyContinue
+
+    if ($secretPointer -ne [IntPtr]::Zero) {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer)
+    }
+    if ($null -ne $secureSecret) {
+        $secureSecret.Dispose()
+    }
+}
+```
+
+Run:
 
 ```powershell
 .\sidecar\run.ps1
 ```
 
-Expected safe validator results include:
+Expected safe output:
 
 ```text
 token_acquired=True
@@ -159,77 +405,336 @@ jwt_decodable=True
 idtyp_is_app=True
 identity_matches_requested_agent=True
 audience_category=microsoft-graph
+has_expiry_claim=True
 has_create_as_manager_role=True
 VALIDATION_COMPLETE=True
 ```
 
-If `has_create_as_manager_role=False`, continue and record it. The later
-manager-role probe is then expected to return `authorization-denied`. This is
-a valid result that shows the role did not enter the app-only token. Inspect
-the current CLI permission setup and consent state before you change it.
+If `has_create_as_manager_role=False`, continue and record it. This means that
+the role did not enter the app-only token. Do not change permissions only to
+make the output match this document.
 
-At this point, `validate.py` has proved token acquisition. `agent.py` has not
-yet participated.
+At this checkpoint, `validate.py` has proved token acquisition. `agent.py` has
+not participated, and Microsoft Graph has not validated the token.
 
 ## Checkpoint B: Connect the real runtime path
 
-### 7. Add a sidecar client to `agent.py`
+Checkpoint B changes the caller:
 
-Add:
+```text
+agent.py -> sidecar -> Entra ID -> resource token
+
+Microsoft Graph is still not called
+```
+
+### 7. Extend `run.ps1` to start the runtime
+
+In `sidecar/run.ps1`, insert this block immediately after the validator
+exit-code check and before the outer `finally`:
+
+```powershell
+    # The Python runtime needs the Agent Identity ID. It does not need the
+    # blueprint credential or tenant configuration.
+    Remove-Item Env:TENANT_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:BLUEPRINT_APP_ID -ErrorAction SilentlyContinue
+    Remove-Item Env:BLUEPRINT_CLIENT_SECRET -ErrorAction SilentlyContinue
+
+    Push-Location $labRoot
+    try {
+        $env:SIDECAR_URL = 'http://127.0.0.1:5000'
+        Write-Host 'Use requests.http from a second terminal.'
+        uv run python .\agent.py
+    }
+    finally {
+        Pop-Location
+        Remove-Item Env:SIDECAR_URL -ErrorAction SilentlyContinue
+    }
+```
+
+The cleanup placeholders are already present in the Checkpoint A script, so
+Compose can still parse the file after the real secret is removed.
+
+### 8. Add the complete token client delta to `agent.py`
+
+Add these standard-library imports near the top:
+
+```python
+import urllib.error
+import urllib.parse
+import urllib.request
+```
+
+After the `AGENT` definition, add:
 
 ```python
 SIDECAR_URL = os.environ.get("SIDECAR_URL", "http://127.0.0.1:5000")
 AGENT_CLIENT_ID = os.environ.get("AGENT_CLIENT_ID")
 ```
 
-Add a function that requests:
+Below those constants, add:
 
-```text
-/AuthorizationHeaderUnauthenticated/graph-app
-    ?AgentIdentity=<Enterprise Agent Identity client ID>
+```python
+def acquire_graph_authorization_header() -> str:
+    if not AGENT_CLIENT_ID:
+        raise RuntimeError("AGENT_CLIENT_ID is not configured")
+
+    query = urllib.parse.urlencode({"AgentIdentity": AGENT_CLIENT_ID})
+    url = (
+        f"{SIDECAR_URL}/AuthorizationHeaderUnauthenticated/graph-app"
+        f"?{query}"
+    )
+    request = urllib.request.Request(url, headers={"Host": "localhost"})
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            body = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise RuntimeError(
+            f"Sidecar returned HTTP {error.code}"
+        ) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError("Sidecar is unavailable") from error
+
+    authorization_header = body.get("authorizationHeader")
+    if not isinstance(authorization_header, str):
+        raise RuntimeError("Sidecar response has no authorization header")
+    if not authorization_header.startswith("Bearer "):
+        raise RuntimeError("Sidecar returned an unexpected authorization scheme")
+
+    return authorization_header
 ```
 
-Use the full `acquire_graph_authorization_header()` implementation from the
-solution only after you try to write it. It must:
+This function returns the authorization header only to code inside
+`agent.py`. It does not print it.
 
-- Fail if `AGENT_CLIENT_ID` is absent.
-- Set `Host: localhost`.
-- Use a timeout.
-- Accept only a string that starts with `Bearer `.
-- Never print or return the token to the HTTP caller.
+In `AgentHandler`:
 
-Add `/identity-check`. Its public result contains only:
+1. Rename the existing `do_POST` method to `handle_post`.
+2. Add these two methods before `handle_post`:
+
+```python
+    def send_json(self, status: int, value: dict[str, object]) -> None:
+        response = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def do_POST(self) -> None:
+        try:
+            self.handle_post()
+        except RuntimeError as error:
+            self.send_json(502, {"error": str(error)})
+```
+
+At the start of `handle_post`, before the `/chat` path check, add:
+
+```python
+        if self.path == "/identity-check":
+            authorization_header = acquire_graph_authorization_header()
+            self.send_json(
+                200,
+                {
+                    "token_acquired": bool(authorization_header),
+                    "token_disclosed": False,
+                },
+            )
+            return
+```
+
+Replace the existing `InvokeAgentScope` and response block at the end of the
+`/chat` path with this complete block:
+
+```python
+        with InvokeAgentScope.start(
+            request=Request(content=[message]),
+            scope_details=InvokeAgentScopeDetails(endpoint=None),
+            agent_details=AGENT,
+        ) as invoke_scope:
+            reply = f"Echo: {message}"
+            invoke_scope.record_response(reply)
+
+        # Make the one-request learning result visible without waiting for the
+        # batch processor schedule.
+        provider.force_flush()
+        self.send_json(200, {"reply": reply})
+```
+
+Do not return or print `authorization_header`.
+
+### 9. Add the Checkpoint B REST request
+
+Append to `requests.http`:
+
+```http
+### Runtime-to-sidecar token acquisition
+# Expected: {"token_acquired":true,"token_disclosed":false}
+POST {{baseUrl}}/identity-check
+Accept: application/json
+```
+
+Run:
+
+```powershell
+.\sidecar\run.ps1
+```
+
+While the script keeps `agent.py` running, send `/identity-check` from VS Code
+REST Client.
+
+Expected result:
 
 ```json
 {"token_acquired":true,"token_disclosed":false}
 ```
-
-Send this request from `requests.http`.
 
 You can now state:
 
 > One explicit path in the real runtime can acquire a resource token that
 > represents the Enterprise Agent Identity.
 
-You cannot state that the whole Python process is governed.
+You cannot state that Graph accepted the token or that the whole Python
+process is governed.
 
-## Checkpoint C: Let the resource enforce permissions
+## Checkpoint C: Let Microsoft Graph enforce permissions
 
-### 8. Add the organization permission probe
+Checkpoint C adds the protected resource:
 
-Use the returned authorization header for:
+```text
+agent.py -> sidecar -> Entra ID -> resource token -> Microsoft Graph
+                                                   -> 200, 401, or 403
+```
+
+### 10. Resolve the Agent Identity object ID
+
+The token request uses the Enterprise Agent Identity client ID. The safe
+single-object Graph endpoint uses its service principal object ID. These are
+different identifiers.
+
+In `sidecar/run.ps1`, add this block after `AGENT_CLIENT_ID` is loaded and
+before the secret prompt:
+
+```powershell
+    $agentObjectId = az ad sp show `
+        --id $env:AGENT_CLIENT_ID `
+        --query id `
+        --output tsv
+
+    if (
+        $LASTEXITCODE -ne 0 -or
+        [string]::IsNullOrWhiteSpace($agentObjectId)
+    ) {
+        throw 'Could not resolve the Agent Identity service principal.'
+    }
+
+    $env:AGENT_OBJECT_ID = [string]$agentObjectId
+```
+
+Add `$env:AGENT_OBJECT_ID` to the `$required` array:
+
+```powershell
+    $required = @(
+        $env:TENANT_ID
+        $env:BLUEPRINT_APP_ID
+        $env:BLUEPRINT_CLIENT_SECRET
+        $env:AGENT_CLIENT_ID
+        $env:AGENT_OBJECT_ID
+    )
+```
+
+Add this line to the outer `finally`:
+
+```powershell
+    Remove-Item Env:AGENT_OBJECT_ID -ErrorAction SilentlyContinue
+```
+
+Do not print the object ID.
+
+### 11. Add shared Graph status handling
+
+In `agent.py`, add these constants after `AGENT_CLIENT_ID`:
+
+```python
+AGENT_OBJECT_ID = os.environ.get("AGENT_OBJECT_ID")
+GRAPH_PROBE_URL = (
+    "https://graph.microsoft.com/v1.0/organization"
+    "?$select=id&$top=1"
+)
+```
+
+After `acquire_graph_authorization_header()`, add:
+
+```python
+def request_graph_status(url: str) -> int:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": acquire_graph_authorization_header(),
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+            return response.status
+    except urllib.error.HTTPError as error:
+        status = error.code
+        error.close()
+        return status
+    except urllib.error.URLError as error:
+        raise RuntimeError("Microsoft Graph is unavailable") from error
+
+
+def graph_result(status: int) -> str:
+    if status == 200:
+        return "authorized"
+    if status == 401:
+        return "authentication-rejected"
+    if status == 403:
+        return "authorization-denied"
+    raise RuntimeError(f"Graph returned unexpected HTTP status {status}")
+```
+
+`response.read()` consumes and discards the Graph response. The lab endpoint
+returns no Graph object data.
+
+### 12. Add the organization permission probe
+
+At the start of `handle_post`, after `/identity-check`, add:
+
+```python
+        if self.path == "/graph-check":
+            result = graph_result(request_graph_status(GRAPH_PROBE_URL))
+            self.send_json(
+                200,
+                {
+                    "token_acquired": True,
+                    "graph_result": result,
+                    "graph_data_disclosed": False,
+                },
+            )
+            return
+```
+
+Append to `requests.http`:
+
+```http
+### Graph operation without the required application permission
+# Expected by default: authorization-denied
+POST {{baseUrl}}/graph-check
+Accept: application/json
+```
+
+This path calls:
 
 ```http
 GET https://graph.microsoft.com/v1.0/organization?$select=id&$top=1
 ```
 
-Read and discard the response body. Return only a result category:
-
-- `authorized`
-- `authentication-rejected`
-- `authorization-denied`
-
-The expected default result is:
+Expected default result:
 
 ```json
 {
@@ -242,24 +747,62 @@ The expected default result is:
 The expected `403` means:
 
 - Entra issued a token.
-- Graph received the token.
+- Graph received and validated the token.
 - The app-only token lacks application `Organization.Read.All`.
 
 An inherited delegated `User.Read.All` scope cannot satisfy an app-only
 operation.
 
-### 9. Add the manager-role probe
+### 13. Add the manager-role probe
 
-Use the same token for this safe single-object read:
+After `graph_result()`, add:
+
+```python
+def check_manager_role() -> str:
+    if not AGENT_OBJECT_ID:
+        raise RuntimeError("AGENT_OBJECT_ID is not configured")
+
+    object_id = urllib.parse.quote(AGENT_OBJECT_ID, safe="")
+    url = (
+        "https://graph.microsoft.com/v1.0/servicePrincipals/"
+        f"{object_id}/microsoft.graph.agentIdentity"
+        "?$select=id"
+    )
+    return graph_result(request_graph_status(url))
+```
+
+At the start of `handle_post`, after `/graph-check`, add:
+
+```python
+        if self.path == "/manager-role-check":
+            self.send_json(
+                200,
+                {
+                    "manager_role_result": check_manager_role(),
+                    "graph_data_disclosed": False,
+                },
+            )
+            return
+```
+
+Append to `requests.http`:
+
+```http
+### Graph operation authorized by AgentIdentity.CreateAsManager
+# Expected when the role is present: authorized
+POST {{baseUrl}}/manager-role-check
+Accept: application/json
+```
+
+This path calls:
 
 ```http
 GET /v1.0/servicePrincipals/{object-id}/microsoft.graph.agentIdentity?$select=id
 ```
 
-The run script resolves the service principal object ID without printing it.
 The runtime reads and discards the Graph body.
 
-Expected result:
+Expected result when `AgentIdentity.CreateAsManager` is in the token:
 
 ```json
 {
@@ -268,14 +811,14 @@ Expected result:
 }
 ```
 
-This operation accepts the `AgentIdentity.CreateAsManager` application role.
-It is safer than the create operation, which would create a persistent Entra
-object.
-
 If the validator reported `has_create_as_manager_role=False`, expect
-`authorization-denied` here instead.
+`authorization-denied` instead. That is a valid result.
 
-## 10. Confirm that the original runtime path still works
+This read operation accepts the `AgentIdentity.CreateAsManager` application
+role. It is safer than the create operation, which would create a persistent
+Entra object.
+
+## 14. Confirm that the original runtime path still works
 
 Send `/chat` again:
 
@@ -319,11 +862,14 @@ docker compose `
 
 ## Compare with the solution
 
-After all checkpoints:
+Only after all checkpoints:
 
 ```powershell
 code --diff .\agent.py ..\solution\agent.py
 code --diff .\requests.http ..\solution\requests.http
+code --diff .\sidecar\run.ps1 ..\solution\sidecar\run.ps1
+code --diff .\sidecar\validate.py ..\solution\sidecar\validate.py
+code --diff .\sidecar\compose.yaml ..\solution\sidecar\compose.yaml
 ```
 
 Keep the remote registration only if you will continue with a governance

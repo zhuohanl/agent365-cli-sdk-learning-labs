@@ -43,7 +43,10 @@ def request_token() -> str | None:
 
     for _ in range(12):
         try:
-            request = urllib.request.Request(url, headers={"Host": "localhost"})
+            request = urllib.request.Request(
+                url,
+                headers={"Host": "localhost"},
+            )
             with urllib.request.urlopen(request, timeout=15) as response:
                 body = json.loads(response.read())
                 value = body.get("authorizationHeader")
