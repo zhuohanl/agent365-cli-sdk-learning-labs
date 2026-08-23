@@ -1,0 +1,26 @@
+@baseUrl = http://127.0.0.1:8080
+
+### Baseline runtime behavior
+# Expected: {"reply":"Echo: hello"}
+POST {{baseUrl}}/chat
+Content-Type: application/json
+Accept: application/json
+
+{
+  "message": "hello"
+}
+
+### Runtime-to-sidecar token acquisition
+# Expected: {"token_acquired":true,"token_disclosed":false}
+POST {{baseUrl}}/identity-check
+Accept: application/json
+
+### Graph operation without the required application permission
+# Expected by default: authorization-denied
+POST {{baseUrl}}/graph-check
+Accept: application/json
+
+### Graph operation authorized by AgentIdentity.CreateAsManager
+# Expected: {"manager_role_result":"authorized","graph_data_disclosed":false}
+POST {{baseUrl}}/manager-role-check
+Accept: application/json

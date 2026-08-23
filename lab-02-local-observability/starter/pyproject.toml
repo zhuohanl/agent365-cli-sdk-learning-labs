@@ -1,0 +1,6 @@
+[project]
+name = "agent365-learning-lab"
+version = "0.1.0"
+description = "Agent 365 CLI and SDK learning lab"
+requires-python = "==3.12.*"
+dependencies = []

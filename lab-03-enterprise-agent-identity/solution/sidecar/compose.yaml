@@ -1,0 +1,36 @@
+services:
+  sidecar:
+    image: mcr.microsoft.com/entra-sdk/auth-sidecar:1.0.0-azurelinux3.0-distroless
+    environment:
+      AzureAd__Instance: https://login.microsoftonline.com/
+      AzureAd__TenantId: ${TENANT_ID}
+      AzureAd__ClientId: ${BLUEPRINT_APP_ID}
+      AzureAd__ClientCredentials__0__SourceType: ClientSecret
+      AzureAd__ClientCredentials__0__ClientSecret: ${BLUEPRINT_CLIENT_SECRET}
+      DownstreamApis__graph-app__BaseUrl: https://graph.microsoft.com/v1.0/
+      DownstreamApis__graph-app__Scopes__0: https://graph.microsoft.com/.default
+      DownstreamApis__graph-app__RequestAppToken: "true"
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5000
+      AllowedHosts: "*"
+    networks:
+      - identity-lab
+    ports:
+      - "127.0.0.1:5000:5000"
+
+  validator:
+    image: mcr.microsoft.com/azure-cli:2.77.0
+    depends_on:
+      - sidecar
+    environment:
+      SIDECAR_URL: http://sidecar:5000
+      AGENT_CLIENT_ID: ${AGENT_CLIENT_ID}
+    volumes:
+      - ./validate.py:/validate.py:ro
+    command: ["python3", "/validate.py"]
+    networks:
+      - identity-lab
+
+networks:
+  identity-lab:
+    driver: bridge

@@ -1,0 +1,11 @@
+@baseUrl = http://127.0.0.1:8080
+
+### Baseline third-party runtime
+# Expected before and after registration: {"reply":"Echo: hello"}
+POST {{baseUrl}}/chat
+Content-Type: application/json
+Accept: application/json
+
+{
+  "message": "hello"
+}

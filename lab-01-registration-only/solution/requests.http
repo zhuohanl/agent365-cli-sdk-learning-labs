@@ -1,0 +1,11 @@
+@baseUrl = http://127.0.0.1:8080
+
+### Runtime behavior remains unchanged after registration
+# Expected: {"reply":"Echo: hello"}
+POST {{baseUrl}}/chat
+Content-Type: application/json
+Accept: application/json
+
+{
+  "message": "hello"
+}

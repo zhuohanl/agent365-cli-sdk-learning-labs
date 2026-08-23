@@ -1,0 +1,9 @@
+**/.venv/
+**/__pycache__/
+**/workspace/
+**/uv.lock
+**/a365.config.json
+**/a365.generated.config.json
+**/.env
+**/*.token
+**/*.secret
