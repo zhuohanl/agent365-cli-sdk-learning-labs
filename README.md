@@ -13,6 +13,7 @@ The labs use a starter-first method. Do not run the solution first.
 | [Lab 1](lab-01-registration-only/INSTRUCTION.md) | Local echo runtime | Register with Agent 365 CLI | A registry record and Entra objects exist, but the runtime does not change |
 | [Lab 2](lab-02-local-observability/INSTRUCTION.md) | The same echo runtime | Add Agent 365 observability | The runtime emits a local agent span |
 | [Lab 3](lab-03-enterprise-agent-identity/INSTRUCTION.md) | The observable echo runtime | Add an Entra Auth SDK sidecar token path | The runtime gets an Agent Identity token and Graph enforces operation permissions |
+| [Lab 4](lab-04-governance-control-boundaries/INSTRUCTION.md) | The Lab 3 identity-bound path | Change Registry and Entra administrative state | Control-plane block, token enforcement, and local compute behavior are separated |
 
 ## Key lessons
 
@@ -21,6 +22,7 @@ The labs use a starter-first method. Do not run the solution first.
 | Lab 1 | Agent 365 CLI creates control-plane and Entra objects. Registration does not connect Agent 365 to an arbitrary local runtime. |
 | Lab 2 | Agent 365 observability instruments the runtime and produces structured OpenTelemetry spans. A local span does not prove Microsoft backend ingestion or runtime governance. |
 | Lab 3 | An Enterprise Agent Identity can obtain a resource token. When the runtime requests and presents that token, only the tested outbound resource call is bound to the identity. The full runtime is not automatically bound or controlled. |
+| Lab 4 | A Registry block, an identity disable action, and a compute stop are different controls. A control affects the real runtime only where execution depends on the controlled gate. |
 
 Each lab contains:
 
@@ -70,7 +72,8 @@ See [Security and cleanup](docs/security-and-cleanup.md) before you start.
 - A permitted test tenant and the roles listed by current `a365 --help`
 
 Lab 1 needs the Agent 365 CLI and Azure CLI authentication. Lab 2 needs Python
-and `uv`. Lab 3 also needs Docker.
+and `uv`. Lab 3 also needs Docker. Lab 4 needs permission to change the
+disposable Registry and Enterprise Agent Identity states.
 
 ## Component model
 

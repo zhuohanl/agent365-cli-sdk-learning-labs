@@ -1,0 +1,27 @@
+@baseUrl = http://127.0.0.1:8080
+
+### 1. Local compute path
+# This path does not request an Enterprise Agent Identity token.
+POST {{baseUrl}}/chat
+Content-Type: application/json
+Accept: application/json
+
+{
+  "message": "governance boundary check"
+}
+
+### 2. Fresh token acquisition path
+# A 200 response with token_acquired=true means token acquisition succeeded.
+# A 502 response means the sidecar or Entra token path rejected the request.
+POST {{baseUrl}}/identity-check
+Accept: application/json
+
+### 3. Graph manager-role enforcement
+# This request reaches Graph only after token acquisition succeeds.
+POST {{baseUrl}}/manager-role-check
+Accept: application/json
+
+### 4. Graph permission boundary
+# This remains authorization-denied without application Organization.Read.All.
+POST {{baseUrl}}/graph-check
+Accept: application/json

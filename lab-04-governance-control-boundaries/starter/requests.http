@@ -1,0 +1,26 @@
+@baseUrl = http://127.0.0.1:8080
+
+### 1. Local compute path
+# Record: working or not-working
+POST {{baseUrl}}/chat
+Content-Type: application/json
+Accept: application/json
+
+{
+  "message": "governance boundary check"
+}
+
+### 2. Fresh token acquisition path
+# Record: token-acquired or token-denied
+POST {{baseUrl}}/identity-check
+Accept: application/json
+
+### 3. Graph operation that accepts AgentIdentity.CreateAsManager
+# Record: authorized, authorization-denied, or token-not-acquired
+POST {{baseUrl}}/manager-role-check
+Accept: application/json
+
+### 4. Graph operation without Organization.Read.All
+# Record: authorization-denied when token acquisition succeeds
+POST {{baseUrl}}/graph-check
+Accept: application/json
