@@ -6,6 +6,17 @@ Connect one outbound path in the Python runtime to an Enterprise Agent
 Identity. Observe token acquisition and Microsoft Graph authorization as two
 separate checks.
 
+## Key lesson
+
+The Enterprise Agent Identity is an Entra principal, not only an item shown in
+the Agent Registry. The sidecar can obtain a resource token that represents
+this identity.
+
+When `agent.py` requests and presents that token, the tested outbound resource
+call becomes bound to the Enterprise Agent Identity. This is a partial
+binding. It does not bind the full process, model, prompt, endpoint, or every
+tool.
+
 ## What this lab proves
 
 - A sidecar can request an app-only resource token that represents an

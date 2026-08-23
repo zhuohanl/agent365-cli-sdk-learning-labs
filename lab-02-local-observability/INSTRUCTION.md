@@ -6,6 +6,15 @@ Add only the Agent 365 observability package to the same local runtime. Export
 the span to the local console before you configure any Microsoft ingestion
 surface.
 
+## Key lesson
+
+OpenTelemetry provides the span pipeline. Agent 365 observability adds
+agent-specific scopes and semantic attributes.
+
+The observed console span proves that the runtime is instrumented. It does not
+prove Microsoft backend ingestion, Enterprise Agent Identity use, or runtime
+governance.
+
 ## What this lab proves
 
 - Agent 365 SDK observability is runtime code.

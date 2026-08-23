@@ -5,6 +5,16 @@
 Register an already-running third-party runtime without importing an Agent 365
 SDK package.
 
+## Key lesson
+
+Agent 365 CLI creates the blueprint, Enterprise Agent Identity, registry
+registration, and permission configuration. These are control-plane and Entra
+objects.
+
+The CLI does not modify `agent.py` or connect the registry entry to the local
+Python process. Registration gives visibility and identity objects, not
+runtime binding.
+
 ## What this lab proves
 
 - Agent 365 CLI can create a blueprint, Enterprise Agent Identity, and registry

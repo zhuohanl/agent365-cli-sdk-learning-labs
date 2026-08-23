@@ -14,6 +14,14 @@ The labs use a starter-first method. Do not run the solution first.
 | [Lab 2](lab-02-local-observability/INSTRUCTION.md) | The same echo runtime | Add Agent 365 observability | The runtime emits a local agent span |
 | [Lab 3](lab-03-enterprise-agent-identity/INSTRUCTION.md) | The observable echo runtime | Add an Entra Auth SDK sidecar token path | The runtime gets an Agent Identity token and Graph enforces operation permissions |
 
+## Key lessons
+
+| Lab | Key lesson |
+| --- | --- |
+| Lab 1 | Agent 365 CLI creates control-plane and Entra objects. Registration does not connect Agent 365 to an arbitrary local runtime. |
+| Lab 2 | Agent 365 observability instruments the runtime and produces structured OpenTelemetry spans. A local span does not prove Microsoft backend ingestion or runtime governance. |
+| Lab 3 | An Enterprise Agent Identity can obtain a resource token. When the runtime requests and presents that token, only the tested outbound resource call is bound to the identity. The full runtime is not automatically bound or controlled. |
+
 Each lab contains:
 
 - `starter/`: the pre-lab files to copy and edit.
