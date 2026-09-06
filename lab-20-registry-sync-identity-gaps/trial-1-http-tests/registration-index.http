@@ -1,0 +1,103 @@
+# Lab 20: Agent Registration collection probe
+#
+# Purpose:
+# Test whether the tenant exposes an undocumented read-only collection endpoint
+# for agent registrations.
+#
+# Current first-party documentation only describes:
+#   GET /beta/copilot/agentRegistrations/{id}
+#
+# It does not describe:
+#   GET /beta/copilot/agentRegistrations
+#
+# This is therefore a bounded negative probe, not use of a supported list API.
+# Do not build implementation logic on a 200 response without first-party
+# documentation confirming that the collection endpoint is supported.
+#
+# Required delegated permission:
+#   AgentRegistration.Read.All
+#
+# Keep tenant ID and client ID in the ignored .env used by index.http.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@registrationReadScope = https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20offline_access
+
+###############################################################################
+# Step R1 - Start device-code authentication
+#
+# Expected:
+#   200 OK with user_code, device_code, and verification_uri.
+#
+# A 400 response mentioning invalid_scope or consent means the app is not
+# configured or consented for AgentRegistration.Read.All.
+
+# @name registrationDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{registrationReadScope}}
+
+###
+
+###############################################################################
+# Step R2 - Complete sign-in
+#
+# Open verification_uri from R1, enter user_code, and sign in locally.
+# Do not share either code.
+
+###############################################################################
+# Step R3 - Exchange the device code for a token
+#
+# Expected:
+#   200 OK with scope containing AgentRegistration.Read.All.
+#
+# authorization_pending means R2 has not completed. Retry after the interval
+# returned by R1. Never save or share this response.
+
+# @name registrationToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{registrationDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Step R4 - Probe the undocumented registration collection endpoint
+#
+# URL:
+#   GET https://graph.microsoft.com/beta/copilot/agentRegistrations
+#
+# Interpret only the status and response shape:
+#
+# 200 OK
+#   The endpoint currently responds with a collection in this tenant.
+#   This is observable behavior, but remains undocumented and unsuitable for
+#   committed implementation until Microsoft documents support.
+#
+# 400 Bad Request, 404 Not Found, or 405 Method Not Allowed
+#   No usable collection endpoint was observed.
+#
+# 401 Unauthorized
+#   Authentication failed; the endpoint capability was not tested.
+#
+# 403 Forbidden
+#   Permission or role denied the request; the endpoint capability remains
+#   inconclusive.
+#
+# Do not save or share a successful response body because it can contain all
+# tenant registration identifiers and metadata.
+
+# @name listAgentRegistrationsProbe
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{registrationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop after R4
+#
+# Do not POST, PATCH, or DELETE any registration in this probe.

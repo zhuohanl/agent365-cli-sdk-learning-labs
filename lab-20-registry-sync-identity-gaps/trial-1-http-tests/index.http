@@ -1,0 +1,228 @@
+# Lab 20: Registry Sync identity gaps
+#
+# Run one request at a time with the VS Code REST Client extension.
+# Keep all real values in this lab's ignored .env file:
+#
+# A365_TENANT_ID=<directory-tenant-id>
+# A365_CLIENT_ID=<A365-Registry-Experiment-client-id>
+# A365_SAMPLE_PACKAGE_ID=<leave-empty-until-step-4>
+#
+# Never commit .env, response files, access tokens, package IDs, agent names,
+# tenant IDs, client IDs, endpoints, or other identifiers.
+#
+# If Send Request appears to do nothing, first confirm that .env exists beside
+# this file and contains non-placeholder values for A365_TENANT_ID and
+# A365_CLIENT_ID. REST Client cannot send Step 1 until both resolve.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@samplePackageId = {{$dotenv A365_SAMPLE_PACKAGE_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@packageScope = https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20offline_access
+
+###############################################################################
+# Step 1 - Start delegated device-code authentication
+#
+# URL:
+#   POST https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/devicecode
+#
+# Request:
+#   Uses the public-client application and requests only
+#   CopilotPackages.Read.All plus offline_access.
+#
+# Expected response:
+#   HTTP 200
+#   {
+#     "user_code": "<short-lived-code>",
+#     "device_code": "<short-lived-device-code>",
+#     "verification_uri": "https://microsoft.com/devicelogin",
+#     "expires_in": 900,
+#     "interval": 5,
+#     "message": "..."
+#   }
+#
+# Do not copy either code into chat or tracked evidence.
+
+# @name startDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{packageScope}}
+
+###
+
+###############################################################################
+# Step 2 - Complete sign-in
+#
+# This step has no HTTP request in this file.
+#
+# 1. Read verification_uri and user_code from the Step 1 response.
+# 2. Open verification_uri locally.
+# 3. Enter user_code.
+# 4. Sign in as the approved user.
+# 5. Return here and run Step 3.
+
+###############################################################################
+# Step 3 - Exchange the device code for a Graph access token
+#
+# URL:
+#   POST https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token
+#
+# Request:
+#   Reuses device_code directly from the named Step 1 response.
+#
+# Expected success response:
+#   HTTP 200
+#   {
+#     "token_type": "Bearer",
+#     "scope": "... CopilotPackages.Read.All ...",
+#     "expires_in": 3599,
+#     "access_token": "<sensitive-token>",
+#     "refresh_token": "<sensitive-token>"
+#   }
+#
+# If sign-in is not complete, the response can be HTTP 400 with:
+#   "error": "authorization_pending"
+#
+# Complete Step 2, wait for the configured interval, and run Step 3 again.
+# Never save or share the token response.
+
+# @name exchangeDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{startDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Step 4 - List all packages in the tenant
+#
+# URL:
+#   GET https://graph.microsoft.com/v1.0/copilot/admin/catalog/packages
+#
+# Request:
+#   Read-only. Requires delegated CopilotPackages.Read.All.
+#
+# Expected response:
+#   HTTP 200
+#   {
+#     "value": [
+#       {
+#         "id": "P_<package-id>",
+#         "displayName": "<agent-name>",
+#         "type": "<package-type>",
+#         "platform": "<source-platform>",
+#         "assetId": "<asset-id>",
+#         "isBlocked": false,
+#         "lastModifiedDateTime": "<timestamp>"
+#       }
+#     ],
+#     "@odata.nextLink": "<present only when another page exists>"
+#   }
+#
+# In the local response:
+# 1. Find one already-approved, non-production GCP Registry Sync sample.
+# 2. Copy only its package id into A365_SAMPLE_PACKAGE_ID in the ignored .env.
+# 3. Follow @odata.nextLink if the response is paginated.
+#
+# Do not assume package id, assetId, or displayName is an Agent Registration ID.
+
+# @name listPackages
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 5 - Get details for the selected package
+#
+# URL:
+#   GET https://graph.microsoft.com/v1.0/copilot/admin/catalog/packages/{id}
+#
+# Request:
+#   Uses exactly the package ID placed in A365_SAMPLE_PACKAGE_ID after Step 4.
+#   It does not list packages again and does not match by name.
+#
+# Expected response:
+#   HTTP 200 with one copilotPackageDetail object:
+#   {
+#     "id": "P_<same-package-id>",
+#     "displayName": "<agent-name>",
+#     "type": "<package-type>",
+#     "platform": "<source-platform>",
+#     "assetId": "<asset-id>",
+#     "elementDetails": [ ... ]
+#   }
+#
+# Record only whether these fields are present, absent, or undocumented:
+# - id
+# - platform
+# - assetId
+# - owner / ownerIds
+# - sourceAgentId
+# - agentIdentityBlueprintId
+# - agentIdentityId
+# - managedByAppId
+# - originatingStore
+#
+# The documented package-detail example does not establish that identity or
+# Agent Registration fields are part of this resource. The live response is
+# the observation; absence must not be rewritten as "unsupported."
+
+# @name getSelectedPackage
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{samplePackageId}}
+Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+# @name getRegistrationUsingPackageIdNegativeProbe
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{samplePackageId}}
+Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+
+###
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages?$filter=platform eq 'GoogleVertexAI'
+Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###############################################################################
+# Stop after Step 5
+#
+# Do not call Agent Registration, create a blueprint, create an Agent Identity,
+# or PATCH anything yet. Package IDs and Agent Registration IDs are documented
+# as identifiers for different resource types, and no supported mapping has
+# been established in this experiment.
+
+###############################################################################
+# Step 6 - Documented identifier boundary (no request)
+#
+# Current first-party documentation exposes:
+#
+# Inventory:
+#   GET /v1.0/copilot/admin/catalog/packages
+#   GET /v1.0/copilot/admin/catalog/packages/{package-id}
+#
+# Registration lifecycle:
+#   POST   /beta/copilot/agentRegistrations
+#   GET    /beta/copilot/agentRegistrations/{registration-id}
+#   PATCH  /beta/copilot/agentRegistrations/{registration-id}
+#   DELETE /beta/copilot/agentRegistrations/{registration-id}
+#
+# It does not document:
+# - a list operation for agentRegistrations;
+# - a lookup by package ID or third-party source agent ID;
+# - a package-to-agentRegistration ID field; or
+# - that the package ID can be used as a registration ID.
+#
+# Observed for the selected GCP Connected Platform package:
+# - package details are readable;
+# - the third-party source agent ID exists only in nested platform metadata;
+# - no Blueprint ID is present;
+# - the Entra Agent ID value is null;
+# - no documented Agent Registration ID is exposed.
+#
+# Therefore there is no supported HTTP request to place here for the proposed
+# registration PATCH target. Do not guess an ID or call the PATCH endpoint.

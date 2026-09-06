@@ -1,0 +1,34 @@
+# Lab 20: Replay one failed notebook registration POST
+#
+# The tracked version contains placeholders and must not be sent.
+# Do not paste private values into the tracked version.
+# Follow ../INSTRUCTION.md, "Replay a failed notebook POST in REST Client", to
+# export the captured request into the ignored evidence directory.
+#
+# The exported copy contains the original bearer token and real identifiers.
+# Do not commit, share, screenshot, or copy it outside protected local evidence.
+#
+# Exporting does not send a request or resolve the notebook's pending write.
+# REST Client does not enforce the notebook's pending_write guard.
+# Before sending, reconcile the earlier outcome or obtain explicit approval
+# for one disposable replay acknowledging that a 500 can still hide a write.
+# Do not remove the pending marker merely to retry.
+#
+# Preserve the captured body, including both identity fields and source ID.
+# Use the captured token while valid. A refreshed token changes the auth
+# context and must be recorded as a separate experiment condition.
+#
+# Send once only. Save status and response privately, including any returned ID.
+# A 201 requires readback and reconciliation before resuming the notebook.
+# Another 500 is not evidence of no write; stop rather than sending again.
+# Keep the local working copy during the approved diagnostic sequence.
+# When finished, remove its bearer value or delete the private working copy.
+
+# @name replayNotebookRegistration
+POST https://graph.microsoft.com/beta/copilot/agentRegistrations
+Authorization: {{capturedAuthorization}}
+Content-Type: {{capturedContentType}}
+Accept: {{capturedAccept}}
+OData-Version: {{capturedODataVersion}}
+
+{{capturedRequestBody}}

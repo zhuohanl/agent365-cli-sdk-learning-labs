@@ -1,5 +1,6 @@
 **/.venv/
 **/__pycache__/
+**/.ipynb_checkpoints/
 **/workspace/
 **/uv.lock
 **/a365.config.json
@@ -7,3 +8,5 @@
 **/.env
 **/*.token
 **/*.secret
+**/auth.local.json
+lab-20-registry-sync-identity-gaps/evidence/

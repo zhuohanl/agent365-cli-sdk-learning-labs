@@ -15,6 +15,18 @@ The labs use a starter-first method. Do not run the solution first.
 | [Lab 3](lab-03-enterprise-agent-identity/INSTRUCTION.md) | The observable echo runtime | Add an Entra Auth SDK sidecar token path | The runtime gets an Agent Identity token and Graph enforces operation permissions |
 | [Lab 4](lab-04-governance-control-boundaries/INSTRUCTION.md) | The Lab 3 identity-bound path | Change Registry and Entra administrative state | Control-plane block, token enforcement, and local compute behavior are separated |
 
+## Independent experiments
+
+Lab 20 starts a separate experiment series. It is not the next required
+lesson in the guided learning path.
+
+| Lab | Question |
+| --- | --- |
+| [Lab 20](lab-20-registry-sync-identity-gaps/INSTRUCTION.md) | Which identity fields and operations are available for third-party Registry Sync inventory records? |
+
+Lab 20 separates its HTTP correlation work under `trial-1-http-tests/` from
+its notebook identity-association work under `trial-2-jupyter-notebook/`.
+
 ## Key lessons
 
 | Lab | Key lesson |
@@ -24,7 +36,7 @@ The labs use a starter-first method. Do not run the solution first.
 | Lab 3 | An Enterprise Agent Identity can obtain a resource token. When the runtime requests and presents that token, only the tested outbound resource call is bound to the identity. The full runtime is not automatically bound or controlled. |
 | Lab 4 | A Registry block, an identity disable action, and a compute stop are different controls. A control affects the real runtime only where execution depends on the controlled gate. |
 
-Each lab contains:
+Each guided lab contains:
 
 - `starter/`: the pre-lab files to copy and edit.
 - `solution/`: the completed reference files.

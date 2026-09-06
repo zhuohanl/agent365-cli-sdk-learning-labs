@@ -1,0 +1,495 @@
+# Lab 20: Disposable registration correlation experiment
+#
+# Purpose:
+# Create one disposable agentRegistration with the same provider-native
+# SourceAgentId as an existing disposable GCP Registry Sync package, then
+# observe whether Package inventory reports a conflict, merge, duplicate, or
+# no change.
+#
+# This experiment intentionally omits:
+# - agentIdentityBlueprintId
+# - agentIdentityId
+#
+# Required delegated permissions:
+# - AgentRegistration.ReadWrite.All
+# - CopilotPackages.Read.All
+# - User.Read
+#
+# Add these local values to the ignored .env:
+#
+# A365_CORRELATION_DISPLAY_NAME=<same disposable agent display name>
+# A365_CORRELATION_SOURCE_AGENT_ID=<nested SourceAgentId>
+# A365_CORRELATION_SOURCE_CREATED_AT=<nested CreatedDateTime>
+# A365_CORRELATION_SOURCE_MODIFIED_AT=<nested LastModifiedDateTime>
+#
+# Copy them only from ../evidence/trial-1-http-tests/disposable-before-create.json.
+# Do not place real values in this tracked file.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@samplePackageId = {{$dotenv A365_SAMPLE_PACKAGE_ID}}
+@displayName = {{$dotenv A365_CORRELATION_DISPLAY_NAME}}
+@sourceAgentId = {{$dotenv A365_CORRELATION_SOURCE_AGENT_ID}}
+@sourceCreatedAt = {{$dotenv A365_CORRELATION_SOURCE_CREATED_AT}}
+@sourceModifiedAt = {{$dotenv A365_CORRELATION_SOURCE_MODIFIED_AT}}
+@createdRegistrationId = {{$dotenv A365_CREATED_REGISTRATION_ID}}
+@updatedDescription = Disposable Registry Sync correlation experiment - description update control
+@gcpProbe1PackageId = {{$dotenv A365_GCP_PROBE_1_PACKAGE_ID}}
+@gcpProbe2PackageId = {{$dotenv A365_GCP_PROBE_2_PACKAGE_ID}}
+@gcpProbe3PackageId = {{$dotenv A365_GCP_PROBE_3_PACKAGE_ID}}
+@gcpProbe4PackageId = {{$dotenv A365_GCP_PROBE_4_PACKAGE_ID}}
+@gcpProbe3DisplayName = {{$dotenv A365_GCP_PROBE_3_DISPLAY_NAME}}
+@gcpProbe3SourceAgentId = {{$dotenv A365_GCP_PROBE_3_SOURCE_AGENT_ID}}
+@gcpProbe3SourceCreatedAt = {{$dotenv A365_GCP_PROBE_3_SOURCE_CREATED_AT}}
+@gcpProbe3SourceModifiedAt = {{$dotenv A365_GCP_PROBE_3_SOURCE_MODIFIED_AT}}
+@gcpProbe4DisplayName = {{$dotenv A365_GCP_PROBE_4_DISPLAY_NAME}}
+@gcpProbe4SourceAgentId = {{$dotenv A365_GCP_PROBE_4_SOURCE_AGENT_ID}}
+@gcpProbe4SourceCreatedAt = {{$dotenv A365_GCP_PROBE_4_SOURCE_CREATED_AT}}
+@gcpProbe4SourceModifiedAt = {{$dotenv A365_GCP_PROBE_4_SOURCE_MODIFIED_AT}}
+@graphBaseUrl = https://graph.microsoft.com
+@experimentScopes = https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20offline_access
+
+###############################################################################
+# Step C3.1 - Start authentication
+
+# @name correlationDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{experimentScopes}}
+
+###
+
+###############################################################################
+# Step C3.2 - Complete sign-in, then exchange the device code
+
+# @name correlationToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{correlationDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Step C3.2a - Get the signed-in user's ID for ownership
+#
+# The first create attempt proved that this delegated client cannot create a
+# registration using the submitted managedByAppId. Use the documented owner
+# path instead. Do not save or share the returned user ID.
+
+# @name currentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step C3.3 - Create one disposable registration
+#
+# Expected success:
+#   201 Created
+#   { "id": "<new-registration-id>" }
+#
+# Other useful outcomes:
+#   400 or 409 describing a duplicate/conflict
+#
+# The signed-in experiment user is recorded as creator and owner.
+# managedByAppId, Blueprint ID, and Entra Agent ID are not supplied.
+
+# @name createCorrelationRegistration
+POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{displayName}}",
+  "description": "Disposable Registry Sync correlation experiment",
+  "createdBy": "{{currentUser.response.body.$.id}}",
+  "ownerIds": [
+    "{{currentUser.response.body.$.id}}"
+  ],
+  "sourceAgentId": "{{sourceAgentId}}",
+  "originatingStore": "GoogleVertexAI",
+  "sourceCreatedDateTime": "{{sourceCreatedAt}}",
+  "sourceLastModifiedDateTime": "{{sourceModifiedAt}}"
+}
+
+###
+
+# Step C4.1 - Read the retained registration before changing it
+#
+# Confirm this is yesterday's user-owned disposable registration. Do not use a
+# Package ID or the current notebook source. A successful GET does not write.
+
+# @name getCreatedRegistrationBeforeDescriptionUpdate
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# Step C4.2 - Update only the retained registration's description
+#
+# Sending this request performs a real mutation. Run it only after C4.1
+# returns 200 for the expected retained registration.
+#
+# Expected: 200 OK with an empty response body.
+# The documented update operation is PATCH, not POST.
+
+# @name updateCreatedRegistrationDescription
+PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "description": "{{updatedDescription}}"
+}
+
+###
+
+###############################################################################
+# Stop after C4.2 and record the status before running another request.
+#
+# Do not automatically repeat PATCH after an unexpected response. Read the
+# target again before deciding whether another write is necessary.
+#
+# Do not run DELETE while this update observation is unresolved.
+
+###############################################################################
+# Step C4.3 - Read back the registration after the description update
+#
+# Expected:
+#   200 OK
+#   description equals updatedDescription
+#
+# Save the response body only to:
+#   ../evidence/trial-1-http-tests/disposable-registration-after-description-update.json
+
+# @name getCreatedRegistrationAfterDescriptionUpdate
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step C4.4 - List Package inventory after registration update
+#
+# Compare this response with the pre-create inventory. Do not assume immediate
+# propagation means permanent behavior.
+#
+# Save the response body only to:
+#   ../evidence/trial-1-http-tests/disposable-packages-after-create.json
+
+# @name listPackagesAfterCreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step C4.5 - Read the original Registry Sync package again
+#
+# This request still uses the original Package ID, not the new Registration ID.
+#
+# Save the response body only to:
+#   ../evidence/trial-1-http-tests/disposable-package-detail-after-create.json
+
+# @name getOriginalPackageAfterCreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{samplePackageId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step C4.6 - Read the new Package using the Registration ID
+#
+# The post-create Package List exposed a second package whose ID equals the
+# Registration ID returned by C3.3. This request checks whether that same ID
+# also addresses Package Details for the API-created record.
+#
+# Save the response body only to:
+#   ../evidence/trial-1-http-tests/disposable-created-package-detail.json
+
+# @name getCreatedPackageByRegistrationId
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{createdRegistrationId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop after C4.6
+#
+# Do not delete the registration until all post-create response bodies have
+# been saved and compared.
+
+###
+
+###############################################################################
+# Step C5.1 - Delete only the registration created by C3.3
+#
+# This operation is irreversible.
+# Observed in this experiment: 204; the retained registration was deleted.
+# Do not send this DELETE again.
+#
+# Target:
+#   A365_CREATED_REGISTRATION_ID from the C3.3 response.
+#
+# It does not target:
+# - the original Registry Sync Package ID;
+# - the GCP agent;
+# - the Connected Platform connection; or
+# - any other registration.
+#
+# Expected:
+#   204 No Content
+#
+# Before sending, run C4.3 and save the latest registration response. The
+# experiment owner explicitly accepted that a failed recreate can leave this
+# registration permanently deleted.
+
+# @name deleteCreatedRegistration
+DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+
+###
+
+###############################################################################
+# Step C5.2 - Confirm the created registration no longer exists
+#
+# Expected:
+#   404 Not Found
+# Observed in this experiment: 404.
+
+# @name getDeletedRegistration
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step C5.3 - Recreate the same user-owned registration once
+#
+# Observed in this experiment: HTTP 500 with the same backend permission
+# denial. No replacement ID was returned. Do not send this POST again.
+#
+# Run only after C5.1 returns 204 and C5.2 returns 404. This request reproduces
+# the successful C3.3 shape with the same source values and no managing app,
+# Blueprint ID, or Agent Identity ID.
+#
+# Expected:
+#   201 Created
+#   { "id": "<new-registration-id>" }
+#
+# If this request fails, the old registration remains permanently deleted.
+# Do not retry automatically. Save the response privately and stop.
+
+# @name recreateCorrelationRegistrationAfterDelete
+POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{displayName}}",
+  "description": "Disposable Registry Sync correlation experiment",
+  "createdBy": "{{currentUser.response.body.$.id}}",
+  "ownerIds": [
+    "{{currentUser.response.body.$.id}}"
+  ],
+  "sourceAgentId": "{{sourceAgentId}}",
+  "originatingStore": "GoogleVertexAI",
+  "sourceCreatedDateTime": "{{sourceCreatedAt}}",
+  "sourceLastModifiedDateTime": "{{sourceModifiedAt}}"
+}
+
+###
+
+###############################################################################
+# Step C5.4 - Read the recreated registration by its returned ID
+#
+# Run only after C5.3 returns 201. This avoids reusing the deleted ID.
+#
+# Expected:
+#   200 OK
+#
+# Save the response body privately, then replace A365_CREATED_REGISTRATION_ID
+# in .env with the new returned ID before any later cleanup.
+
+# @name getRecreatedRegistration
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{recreateCorrelationRegistrationAfterDelete.response.body.$.id}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop after C5.4 and reconcile the new or missing registration before
+# continuing. Never send C5.3 a second time after a 201 response.
+
+###############################################################################
+# Step C5.5 - Inspect Package inventory after the delete/recreate attempt
+#
+# Expected:
+# - the original Registry Sync package remains;
+# - after a successful recreate, a new API-created package can reappear after
+#   propagation under the new Registration ID;
+# - after a failed recreate, the deleted API-created package should disappear
+#   after propagation.
+#
+# Save the response body only to:
+#   ../evidence/trial-1-http-tests/disposable-packages-after-delete-recreate.json
+
+# @name listPackagesAfterDeleteRecreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step C5.6 - Confirm the original Registry Sync package remains readable
+#
+# Expected:
+#   200 OK
+
+# @name getOriginalPackageAfterDeleteRecreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{samplePackageId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Four-source GCP create probe - read-only preflight
+#
+# These GETs use the same correlationToken as the create requests. Run them
+# individually before preparing any POST. Confirm each returned Package ID and
+# nested SourceAgentId match the private .env target.
+
+# @name getGcpProbe1PackageDetails
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe1PackageId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# @name getGcpProbe2PackageDetails
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe2PackageId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# @name getGcpProbe3PackageDetails
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe3PackageId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# @name getGcpProbe4PackageDetails
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe4PackageId}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Four-source GCP create probe - remaining untested sources
+#
+# Probes 1 and 2 are not repeated:
+# - probe 1 is the deleted source whose exact-body recreate returned 500;
+# - probe 2 is Test V2, whose identity-free create returned the same 500.
+#
+# The two requests below reuse the same correlationToken and currentUser. They
+# include only the documented required create fields, the user owner, and the
+# GCP source/store fields. They omit description, managedByAppId, Blueprint ID,
+# Agent Identity ID, and agentCard.
+#
+# Each POST can create a real parallel registration and Package record. Save
+# every response before proceeding. Never repeat a POST after 201 or 500.
+
+###############################################################################
+# Probe 3 - AGENT_DESIGNER_GENERATED_DO_NOT_DELETE
+#
+# Observed: HTTP 500 with the same backend permission-denial message and no
+# Registration ID. Do not send this POST again.
+#
+# The provider agent is read-only and is not deleted or changed. A successful
+# POST creates only a separate Agent 365 registration for its source.
+
+# @name createGcpProbe3Registration
+POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{gcpProbe3DisplayName}}",
+  "createdBy": "{{currentUser.response.body.$.id}}",
+  "ownerIds": [
+    "{{currentUser.response.body.$.id}}"
+  ],
+  "sourceAgentId": "{{gcpProbe3SourceAgentId}}",
+  "originatingStore": "GoogleVertexAI",
+  "sourceCreatedDateTime": "{{gcpProbe3SourceCreatedAt}}",
+  "sourceLastModifiedDateTime": "{{gcpProbe3SourceModifiedAt}}"
+}
+
+###
+
+# Run only after probe 3 returns 201.
+# @name getCreatedGcpProbe3Registration
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Probe 4 - deep-search-agent
+#
+# Observed: HTTP 500 with the same backend permission-denial message and no
+# Registration ID. Do not send this POST again.
+
+# @name createGcpProbe4Registration
+POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{gcpProbe4DisplayName}}",
+  "createdBy": "{{currentUser.response.body.$.id}}",
+  "ownerIds": [
+    "{{currentUser.response.body.$.id}}"
+  ],
+  "sourceAgentId": "{{gcpProbe4SourceAgentId}}",
+  "originatingStore": "GoogleVertexAI",
+  "sourceCreatedDateTime": "{{gcpProbe4SourceCreatedAt}}",
+  "sourceLastModifiedDateTime": "{{gcpProbe4SourceModifiedAt}}"
+}
+
+###
+
+# Run only after probe 4 returns 201.
+# @name getCreatedGcpProbe4Registration
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe4Registration.response.body.$.id}}
+Authorization: Bearer {{correlationToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop after both probe results are saved. Do not add identity fields, retry a
+# failed POST, or delete a successful registration until the matrix is updated
+# and cleanup is separately approved.
