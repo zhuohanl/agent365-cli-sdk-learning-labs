@@ -92,20 +92,55 @@ def fake_prompt(prompt):
     raise AssertionError("Unexpected fixture prompt.")
 getpass.getpass = fake_prompt
 _auth_calls = []
+_silent_calls = []
+_interactive_options = []
+_accounts = []
+_token_cache = []
 _auth_failure = False
 class FakeApplication:
     def __init__(self, client_id, *, authority, exclude_scopes):
         assert client_id == CLIENT
         assert authority == "https://login.microsoftonline.com/" + TENANT
         assert exclude_scopes == ["offline_access"]
-    def acquire_token_interactive(self, *, scopes, prompt, timeout):
-        assert prompt == msal.Prompt.SELECT_ACCOUNT
+
+    def get_accounts(self, username=None):
+        return [account for account in _accounts if not username or account["username"] == username]
+
+    def acquire_token_silent(self, scopes, account):
+        _silent_calls.append(scopes)
+        if _auth_failure:
+            return None
+        requested = set(scopes)
+        for granted, result in reversed(_token_cache):
+            if requested <= granted and account in _accounts:
+                return {
+                    "access_token": result["access_token"],
+                    "expires_in": 3600,
+                }
+        return None
+
+    def acquire_token_interactive(self, *, scopes, timeout, prompt=None, login_hint=None):
         assert timeout == 300
         assert scopes and all(scope.startswith("https://graph.microsoft.com/") for scope in scopes)
         _auth_calls.append(scopes)
+        _interactive_options.append((prompt, login_hint))
+        if login_hint:
+            assert prompt is None
+            assert login_hint == "operator@example.test"
+        else:
+            assert prompt == msal.Prompt.SELECT_ACCOUNT
         if _auth_failure:
             return {"error": "access_denied", "error_description": "fixture-sensitive-error"}
-        return {"access_token": "fixture-access-token"}
+        account = {"username": "operator@example.test", "local_account_id": OPERATOR}
+        _accounts[:] = [account]
+        result = {
+            "access_token": "fixture-access-token",
+            "scope": " ".join(scopes),
+            "expires_on": "4102444800",
+            "id_token_claims": {"oid": OPERATOR, "preferred_username": account["username"]},
+        }
+        _token_cache.append((set(scopes), result))
+        return dict(result)
 msal.PublicClientApplication = FakeApplication
 def reply(status, value=None):
     response = requests.Response()
@@ -381,16 +416,53 @@ save_state()
                 f"WRITE = {write!r}\nFIRST_COMPANION = {first_companion!r}\nREGISTRATION_FAILURE = {registration_failure!r}\nDENY_CONFIRMATION = {deny_confirmation!r}\n" + FIXTURE
                 + ("\n_objects.pop(SP_ROOT + '/' + PRINCIPAL + '/' + PR_TYPE)\n" if missing_principal else ""),
             ))
+            cleanup_index = next(index for index, cell in enumerate(notebook.cells) if cell.id == "cleanup-code")
+            notebook.cells.insert(cleanup_index, nbformat.v4.new_code_cell("""
+interactive_count = len(_auth_calls)
+silent_count = len(_silent_calls)
+sign_in(DISCOVERY_SCOPES)
+assert len(_auth_calls) == interactive_count
+assert len(_silent_calls) == silent_count
+access_token_expires_at = 0
+sign_in(DISCOVERY_SCOPES)
+assert len(_auth_calls) == interactive_count
+assert len(_silent_calls) == silent_count + 1
+"""))
             expected_writes = [] if not write else ["POST", "POST"] * (2 if multiple_groups else 1) + ["POST", "POST" if first_companion else "PATCH"]
             if cleanup or cleanup_blueprint:
                 expected_writes.append("DELETE")
+            initial_scopes = [
+                "User.Read",
+                "CopilotPackages.Read.All",
+                "AgentIdentityBlueprint.Read.All",
+                "AgentIdentityBlueprintPrincipal.Read.All",
+                "AgentIdentity.Read.All",
+                "AgentRegistration.Read.All",
+            ]
+            if write:
+                initial_scopes += [
+                    "AgentIdentityBlueprint.Create",
+                    "AgentIdentityBlueprintPrincipal.Create",
+                    "AgentIdentity.Create.All",
+                    "AgentRegistration.ReadWrite.All",
+                ]
+            expected_initial_scopes = [
+                "https://graph.microsoft.com/" + scope for scope in sorted(set(initial_scopes))
+            ]
             notebook.cells.append(nbformat.v4.new_code_cell(f"""
 assert [method for method, _, _ in _calls if method != "GET"] == {expected_writes!r}
-assert len(_auth_calls) == {4 if cleanup or cleanup_blueprint else 3}
-assert _auth_calls[0] == ["https://graph.microsoft.com/CopilotPackages.Read.All", "https://graph.microsoft.com/User.Read"]
+assert len(_auth_calls) == {2 if cleanup_blueprint else 1}
+assert len(_silent_calls) == {2 if cleanup or cleanup_blueprint else 1}
+assert _auth_calls[0] == {expected_initial_scopes!r}
+assert _interactive_options[0] == (msal.Prompt.SELECT_ACCOUNT, None)
+assert not {cleanup_blueprint!r} or _interactive_options[1] == (None, "operator@example.test")
 assert state["original_id"] == ORIGINAL
 assert not state.get("pending_write")
 assert access_token is None
+assert access_token_scopes == set()
+assert access_token_expires_at == 0
+assert auth_account is None
+assert auth_client is None
 assert "fixture-access-token" not in STATE_FILE.read_text()
 assert state["sponsor_id"] == OPERATOR
 assert not any("sponsor user" in prompt for prompt in _prompts)
@@ -430,8 +502,11 @@ assert SP_ROOT + "/" + uid(203) + "/" + PR_TYPE not in _objects
             if auth_failure:
                 notebook.cells.append(nbformat.v4.new_code_cell("""
 access_token = "fixture-stale-token"
+access_token_scopes = {scope.lower() for scope in DISCOVERY_SCOPES}
+access_token_expires_at = 0
 _auth_failure = True
 call_count = len(_calls)
+interactive_count = len(_auth_calls)
 try:
     sign_in(DISCOVERY_SCOPES)
 except RuntimeError as error:
@@ -439,6 +514,9 @@ except RuntimeError as error:
 else:
     raise AssertionError("Failed browser sign-in must stop.")
 assert access_token is None
+assert access_token_scopes == set()
+assert access_token_expires_at == 0
+assert len(_auth_calls) == interactive_count + 1
 assert len(_calls) == call_count
 assert "fixture-sensitive-error" not in STATE_FILE.read_text()
 """))

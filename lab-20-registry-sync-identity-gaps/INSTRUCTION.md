@@ -204,12 +204,22 @@ registrations > the existing login app > Authentication** that
 change; the notebook does not change the app or grant consent. No client
 secret is needed. Run the browser and kernel on the same local computer.
 
+Prep creates one MSAL client for the kernel and requests the normal workflow
+scopes once, including the create/write scopes only when `RUN_WRITES = True`.
+Later phase calls reuse the unexpired token directly or use the same in-memory
+MSAL cache before opening the browser. The account chooser is forced only for
+the first interactive sign-in. Cleanup-only permissions, token expiry, MFA,
+Conditional Access, or another Entra challenge can still require one more
+browser interaction. The cache is memory-only: restarting the kernel or
+rerunning `setup-code` requires a new sign-in, and no refresh token is saved to
+disk.
+
 ### Run the three-part notebook
 
 | Section | What to do |
 | --- | --- |
 | Prerequisites | Confirm the existing login app, localhost redirect, and already-approved delegated scopes. No app, secret, or consent grant is created. |
-| Prep | Restart the kernel, load the simple HTTP/state helpers, sign in through the browser, and read every visible Package List page. |
+| Prep | Restart the kernel, load the simple HTTP/state helpers, complete the one normal-workflow browser sign-in, and read every visible Package List page. |
 | Part 1 | Group the existing List packages results by `platform`, with no per-package detail calls. Manually confirm `REGISTRY_SYNC_PLATFORMS` using approved setup/portal context, define `BLUEPRINT_GROUPS`, and approve the plan with `GROUPS_APPROVED`. Read/create each group's Blueprint application and principal. |
 | Part 2 | Read the selected agent's details, take `platform` directly from that response, and extract its exact source agent ID. Manually choose `blueprint_group`, approve membership with `AGENT_GROUP_APPROVED`, and resolve Part 1's saved binding. Read/create the Agent Identity using the Blueprint's `appId`. |
 | Part 3 | GET the known companion registration and PATCH its identity fields. Use POST only for an explicitly confirmed first companion, not after a failed GET or lost ID. Read back the links and compare packages. |
@@ -245,8 +255,10 @@ Saved objects are always read/reused first. In reuse mode, a missing saved
 ID still prompts privately because the notebook must not guess it.
 Only select creation after confirming the object has not already been
 created; a lost ID or failed read is not evidence of absence.
-Tenant/client IDs are requested only when not saved. Browser sign-in and
-tenant-required MFA remain, as does selection between ambiguous packages.
+Tenant/client IDs are requested only when not saved. Later phases normally
+reuse the Prep sign-in, while new cleanup scopes, expiry, and tenant-required
+MFA or Conditional Access can still reopen the browser. Selection between
+ambiguous packages also remains.
 
 The inventory groups all visible platforms, but a platform label alone does
 not establish Registry Sync origin. Part 1.1 uses only the List response;
