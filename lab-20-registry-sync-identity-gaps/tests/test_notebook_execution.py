@@ -256,10 +256,10 @@ class NotebookTests(unittest.TestCase):
             else:
                 headings.extend(re.findall(r"(?m)^## (.+)$", cell.source))
         self.assertEqual(headings, [
-            "Prerequisites", "Prep",
-            "Part 1 - Create or reuse Blueprints by platform",
-            "Part 2 - Create or reuse an Agent Identity for the selected agent",
-            "Part 3 - Create or update the agent registration", "Cleanup and limits",
+            "Prerequisites", "Prep - configure the run",
+            "Part 1 - Prepare the Blueprint group",
+            "Part 2 - Resolve the selected agent and Agent Identity",
+            "Part 3 - Test the Agent Registration boundary", "Cleanup and limits",
         ])
         self.assertFalse((LAB / "registry_sync_workflow.py").exists())
 
@@ -321,6 +321,7 @@ class NotebookTests(unittest.TestCase):
                     namespace = {
                         "request_graph": request, "UUID": UUID, "quote": quote,
                         "GRAPH": "https://graph.microsoft.com",
+                        "TARGET_NAME": "Test V2",
                         "platform": "GoogleVertexAI", "group": "test-v2-dev",
                         "bp_record": "synthetic-blueprint",
                         "state": {"sponsor_id": "tbc", "operator_id": "00000000-0000-4000-8000-000000000003"},

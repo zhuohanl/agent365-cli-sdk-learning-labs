@@ -197,12 +197,24 @@ Use a trusted local kernel, not a shared or publicly exposed notebook
 server. Do not enable verbose HTTP logging or print private response/state
 objects while tokens are in memory.
 
-For browser sign-in, confirm in **Microsoft Entra admin center > App
-registrations > the existing login app > Authentication** that
-`http://localhost` is registered under **Mobile and desktop applications**
-(not Web or SPA). If missing, stop and ask the app owner for an approved
-change; the notebook does not change the app or grant consent. No client
-secret is needed. Run the browser and kernel on the same local computer.
+For browser sign-in, use a tenant-owned, single-tenant public-client app. In
+**Microsoft Entra admin center > App registrations > the login app >
+Authentication**, register the exact `http://localhost` redirect under
+**Mobile and desktop applications** (not Web or SPA), and set **Allow public
+client flows** to **Yes** under Advanced settings. No client secret is needed.
+Copy the **Application (client) ID** and **Directory (tenant) ID** from
+Overview; do not confuse the client ID with the app's Object ID.
+
+Under **API permissions**, add Microsoft Graph **Delegated permissions**, not
+Application permissions. The notebook's Prerequisites section lists each
+read, create, registration, and cleanup permission and whether admin consent
+is required. Confirm the granted status before running. If a beta Agent
+Identity permission is not visible, stop and use the tenant administrator's
+approved permission process rather than substituting a broader permission.
+See the official
+[desktop app configuration](https://learn.microsoft.com/entra/identity-platform/scenario-desktop-app-configuration)
+and [Microsoft Graph permissions reference](https://learn.microsoft.com/graph/permissions-reference).
+Run the browser and kernel on the same local computer.
 
 Prep creates one MSAL client for the kernel and requests the normal workflow
 scopes once, including the create/write scopes only when `RUN_WRITES = True`.
@@ -218,7 +230,7 @@ disk.
 
 | Section | What to do |
 | --- | --- |
-| Prerequisites | Confirm the existing login app, localhost redirect, and already-approved delegated scopes. No app, secret, or consent grant is created. |
+| Prerequisites | Prepare Python/uv and a workspace copy; validate the single-tenant public-client app, localhost desktop redirect, public-client flow, delegated Graph permissions, and admin consent. |
 | Prep | Configure targets, groups, and Graph paths in `configuration-variables`; configure approvals, create switches, and cleanup switches in `configuration-switches`; then run `setup-code`, complete the one normal-workflow browser sign-in, and read every visible Package List page. |
 | Part 1 | Group the existing List packages results by `platform`, with no per-package detail calls. Manually confirm `REGISTRY_SYNC_PLATFORMS` using approved setup/portal context, define `BLUEPRINT_GROUPS`, and approve the plan with `GROUPS_APPROVED`. Read/create each group's Blueprint application and principal. |
 | Part 2 | Read the selected agent's details, take `platform` directly from that response, and extract its exact source agent ID. Use `SELECTED_BLUEPRINT_GROUP`, approve membership with `AGENT_GROUP_APPROVED`, and resolve Part 1's saved binding. Read/create the Agent Identity using the Blueprint's `appId`. |
