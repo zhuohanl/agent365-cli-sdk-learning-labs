@@ -215,6 +215,33 @@ class NotebookTests(unittest.TestCase):
     def test_template_is_clean_and_self_contained(self):
         notebook = nbformat.read(NOTEBOOK, as_version=4)
         nbformat.validate(notebook)
+        cells = {cell.id: cell for cell in notebook.cells}
+        cell_ids = [cell.id for cell in notebook.cells]
+        self.assertLess(cell_ids.index("configuration-variables"), cell_ids.index("configuration-switches"))
+        self.assertLess(cell_ids.index("configuration-switches"), cell_ids.index("setup-code"))
+
+        def assigned_names(cell_id):
+            return {
+                target.id
+                for node in ast.parse(cells[cell_id].source).body
+                if isinstance(node, ast.Assign)
+                for target in node.targets
+                if isinstance(target, ast.Name)
+            }
+
+        variable_names = {
+            "TARGET_NAME", "PLATFORM", "REGISTRY_SYNC_PLATFORMS", "BLUEPRINT_GROUPS",
+            "SELECTED_BLUEPRINT_GROUP", "GRAPH", "PACKAGES", "REGISTRATIONS",
+        }
+        switch_names = {
+            "RUN_WRITES", "CONFIRM_EACH_WRITE", "GROUPS_APPROVED", "AGENT_GROUP_APPROVED",
+            "CREATE_BLUEPRINT", "CREATE_PRINCIPAL", "CREATE_IDENTITY", "CREATE_COMPANION",
+            "DELETE_OBJECT", "CONFIRMED_NO_DEPENDENTS", "CLEANUP_PLATFORM", "CLEANUP_GROUP",
+        }
+        self.assertEqual(assigned_names("configuration-variables"), variable_names)
+        self.assertEqual(assigned_names("configuration-switches"), switch_names)
+        self.assertFalse((variable_names | switch_names) & assigned_names("setup-code"))
+
         headings = []
         for cell in notebook.cells:
             if cell.cell_type == "code":
@@ -390,9 +417,9 @@ class NotebookTests(unittest.TestCase):
                         cell.source = cell.source.replace(name + " = False", name + " = True")
                 if confirm_writes:
                     cell.source = cell.source.replace("CONFIRM_EACH_WRITE = False", "CONFIRM_EACH_WRITE = True")
-                if multiple_groups and cell.id == "setup-code":
+                if multiple_groups and cell.id == "configuration-variables":
                     cell.source = cell.source.replace("['test-v2-dev']", "['test-v2-dev', 'support-dev']")
-                if cell.id == "setup-code":
+                if cell.id == "configuration-variables":
                     cell.source = cell.source.replace("SELECTED_BLUEPRINT_GROUP = 'test-v2-dev'", f"SELECTED_BLUEPRINT_GROUP = {selected_group!r}")
                 if first_companion or registration_failure:
                     cell.source = cell.source.replace("CREATE_COMPANION = False", "CREATE_COMPANION = True")

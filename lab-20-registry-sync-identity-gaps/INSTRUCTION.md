@@ -219,7 +219,7 @@ disk.
 | Section | What to do |
 | --- | --- |
 | Prerequisites | Confirm the existing login app, localhost redirect, and already-approved delegated scopes. No app, secret, or consent grant is created. |
-| Prep | Configure all targets, approvals, create switches, and cleanup switches in the first `setup-code` cell; then load the helpers, complete the one normal-workflow browser sign-in, and read every visible Package List page. |
+| Prep | Configure targets, groups, and Graph paths in `configuration-variables`; configure approvals, create switches, and cleanup switches in `configuration-switches`; then run `setup-code`, complete the one normal-workflow browser sign-in, and read every visible Package List page. |
 | Part 1 | Group the existing List packages results by `platform`, with no per-package detail calls. Manually confirm `REGISTRY_SYNC_PLATFORMS` using approved setup/portal context, define `BLUEPRINT_GROUPS`, and approve the plan with `GROUPS_APPROVED`. Read/create each group's Blueprint application and principal. |
 | Part 2 | Read the selected agent's details, take `platform` directly from that response, and extract its exact source agent ID. Use `SELECTED_BLUEPRINT_GROUP`, approve membership with `AGENT_GROUP_APPROVED`, and resolve Part 1's saved binding. Read/create the Agent Identity using the Blueprint's `appId`. |
 | Part 3 | GET the known companion registration and PATCH its identity fields. Use POST only for an explicitly confirmed first companion, not after a failed GET or lost ID. Read back the links and compare packages. |
@@ -227,15 +227,15 @@ disk.
 
 Keep `RUN_WRITES = False` for inspection. Enable it and only the required
 `CREATE_BLUEPRINT`, `CREATE_PRINCIPAL`, `CREATE_IDENTITY`, or
-`CREATE_COMPANION` switches after approval. All operator-editable run controls
-are grouped in the first `setup-code` cell; later cells consume them without
-resetting them. Routine POST/PATCH operations no longer ask for `APPLY` by
+`CREATE_COMPANION` switches after approval. Ordinary settings and action
+switches are kept in two separate cells at the start; later cells consume them
+without resetting them. Routine POST/PATCH operations no longer ask for `APPLY` by
 default; set `CONFIRM_EACH_WRITE = True` in Prep
 to restore per-write prompts. Deletion always asks for `APPLY`, and a first
 companion registration always requires `FIRST`.
 Use `CREATE_COMPANION = False` when a companion is already known for the exact
-selected source, and recover its Registration ID. Choose this mode in the Prep
-configuration block before running 3.1.
+selected source, and recover its Registration ID. Choose this mode in
+`configuration-switches` before running 3.1.
 The earlier retained HTTP companion has a different exact source ID from the
 current notebook selection; do not reuse it for this selection.
 
@@ -458,7 +458,7 @@ them.
 
 ### Notebook local artifacts and cleanup
 
-Leave `DELETE_OBJECT = None` in the Prep configuration block to preserve the
+Leave `DELETE_OBJECT = None` in `configuration-switches` to preserve the
 earlier retention decision. Optional deletion is limited to objects created by
 this notebook, one at a time, after dependency review and confirmation. It does
 not delete provider agents, Registry Sync connections, or reused objects. For
