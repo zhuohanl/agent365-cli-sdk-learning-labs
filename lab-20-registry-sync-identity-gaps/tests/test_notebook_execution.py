@@ -309,6 +309,9 @@ class NotebookTests(unittest.TestCase):
         state.setdefault("operator_id", "00000000-0000-4000-8000-000000000003")
         return {
             "state": state, "packages_by_platform": {"GoogleVertexAI": []},
+            "REGISTRY_SYNC_PLATFORMS": {"GoogleVertexAI"},
+            "BLUEPRINT_GROUPS": {"GoogleVertexAI": ["test-v2-dev"]},
+            "GROUPS_APPROVED": False,
             "getpass": Mock(return_value=entered_value), "save_state": Mock(),
         }
 
@@ -387,10 +390,10 @@ class NotebookTests(unittest.TestCase):
                         cell.source = cell.source.replace(name + " = False", name + " = True")
                 if confirm_writes:
                     cell.source = cell.source.replace("CONFIRM_EACH_WRITE = False", "CONFIRM_EACH_WRITE = True")
-                if multiple_groups and cell.id == "part-1-groups-code":
+                if multiple_groups and cell.id == "setup-code":
                     cell.source = cell.source.replace("['test-v2-dev']", "['test-v2-dev', 'support-dev']")
-                if cell.id == "part-2-group-code":
-                    cell.source = cell.source.replace("blueprint_group = 'test-v2-dev'", f"blueprint_group = {selected_group!r}")
+                if cell.id == "setup-code":
+                    cell.source = cell.source.replace("SELECTED_BLUEPRINT_GROUP = 'test-v2-dev'", f"SELECTED_BLUEPRINT_GROUP = {selected_group!r}")
                 if first_companion or registration_failure:
                     cell.source = cell.source.replace("CREATE_COMPANION = False", "CREATE_COMPANION = True")
                 if cleanup:
@@ -398,7 +401,7 @@ class NotebookTests(unittest.TestCase):
                     cell.source = cell.source.replace("CONFIRMED_NO_DEPENDENTS = False", "CONFIRMED_NO_DEPENDENTS = True")
                 if cleanup_blueprint:
                     cell.source = cell.source.replace("DELETE_OBJECT = None", "DELETE_OBJECT = 'blueprint'")
-                    cell.source = cell.source.replace("CLEANUP_GROUP = blueprint_group", "CLEANUP_GROUP = 'support-dev'")
+                    cell.source = cell.source.replace("CLEANUP_GROUP = None", "CLEANUP_GROUP = 'support-dev'")
                     cell.source = cell.source.replace("CONFIRMED_NO_DEPENDENTS = False", "CONFIRMED_NO_DEPENDENTS = True")
                 if legacy and cell.id == "setup-code":
                     cell.source += """
