@@ -494,6 +494,7 @@ assert access_token_scopes == set()
 assert access_token_expires_at == 0
 assert auth_account is None
 assert auth_client is None
+assert failed_response is None
 assert "fixture-access-token" not in STATE_FILE.read_text()
 assert state["sponsor_id"] == OPERATOR
 assert not any("sponsor user" in prompt for prompt in _prompts)
@@ -561,6 +562,7 @@ except AssertionError as error:
     assert "403" in str(error)
 else:
     raise AssertionError("Failed write must stop.")
+assert failed_response.status_code == 403
 assert state["pending_write"]["record"] == "uncertain"
 call_count = len(_calls)
 try:

@@ -324,12 +324,14 @@ that the POST made no change.
 
 Use
 [`registration-identity-replay-template.http`](trial-2-jupyter-notebook/registration-identity-replay-template.http)
-as an export template, not as a request to send directly. In the same local
-kernel where the recovery cell captured `failed_response`, run this temporary
-cell. It copies the actual prepared request rather than reconstructing it from
-possibly changed notebook variables or the earlier HTTP sample:
+as an export template, not as a request to send directly. The current notebook
+helper retains the most recent unexpected HTTP response as `failed_response`
+in kernel memory. Immediately after the failed Part 3.2 request, run this
+temporary cell. It copies the actual prepared request rather than reconstructing
+it from possibly changed notebook variables or the earlier HTTP sample:
 
 ```python
+assert failed_response is not None, 'No captured HTTP failure is available in this kernel.'
 req = failed_response.request
 assert req.method == 'POST' and req.url == 'https://graph.microsoft.com/beta/copilot/agentRegistrations', 'Not the expected registration POST.'
 body = req.body.decode('utf-8') if isinstance(req.body, bytes) else req.body
@@ -350,6 +352,63 @@ with (PRIVATE / 'registration-create-replay.http').open('x', encoding='utf-8', n
     output.write(text)
 print({'private_replay_file_created': True, 'request_sent': False})
 ```
+
+If `failed_response` is undefined or `None`, the failed request came from an
+older helper version, the kernel was restarted, or another cell cleared the
+in-memory response. Rerunning Part 3.2 only to recreate that variable is not
+safe. If an explicitly approved replay is still required, prepare the current
+request without sending it:
+
+```python
+assert access_token and identity_verified and CREATE_COMPANION, 'Current authenticated creation context is required.'
+assert state.get('pending_write', {}).get('record') == 'registration', 'Expected the unresolved registration marker.'
+for timestamp in (source.get('CreatedDateTime'), source.get('LastModifiedDateTime')):
+    assert isinstance(timestamp, str) and datetime.fromisoformat(timestamp).tzinfo is not None, 'Invalid source timestamp.'
+replay_body = {
+    'displayName': f'{TARGET_NAME} - identity companion',
+    'description': 'Disposable companion; original Registry Sync record retained',
+    'createdBy': state['operator_id'],
+    'ownerIds': [state['operator_id']],
+    'sourceAgentId': state['source_agent_id'],
+    'originatingStore': agent_platform,
+    'sourceCreatedDateTime': source['CreatedDateTime'],
+    'sourceLastModifiedDateTime': source['LastModifiedDateTime'],
+    'agentIdentityBlueprintId': blueprint['appId'],
+    'agentIdentityId': agent_identity['id'],
+}
+req = requests.Request(
+    'POST',
+    GRAPH + REGISTRATIONS,
+    headers={
+        'Authorization': 'Bearer ' + access_token,
+        'Accept': 'application/json',
+        'OData-Version': '4.0',
+    },
+    json=replay_body,
+).prepare()
+body = req.body.decode('utf-8') if isinstance(req.body, bytes) else req.body
+text = (LAB_ROOT / 'trial-2-jupyter-notebook' / 'registration-identity-replay-template.http').read_text(encoding='utf-8')
+captured = {
+    'capturedAuthorization': req.headers['Authorization'],
+    'capturedContentType': req.headers['Content-Type'],
+    'capturedAccept': req.headers['Accept'],
+    'capturedODataVersion': req.headers['OData-Version'],
+    'capturedRequestBody': body,
+}
+for name, value in captured.items():
+    marker = '{{' + name + '}}'
+    assert text.count(marker) == 1, 'Unexpected replay template.'
+    text = text.replace(marker, value)
+destination = PRIVATE / 'registration-create-replay.http'
+assert not destination.exists(), 'A private replay file already exists; inspect it instead of overwriting it.'
+with destination.open('x', encoding='utf-8', newline='\n') as output:
+    output.write(text)
+print({'private_replay_file_created': True, 'request_sent': False, 'source': 'reconstructed current context'})
+```
+
+This fallback is a reconstruction of the current notebook variables, not proof
+that every header and value matches the earlier failed request. Record that
+difference as a new experiment condition.
 
 The generated file is
 `evidence\trial-2-jupyter-notebook\registration-create-replay.http`.
