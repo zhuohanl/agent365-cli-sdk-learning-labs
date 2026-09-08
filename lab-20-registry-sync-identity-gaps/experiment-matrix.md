@@ -115,6 +115,31 @@ this request failed. Changing HTTP clients did not resolve the denial. The
 earlier no-identity success used a different exact source ID, so it does not
 isolate the identity fields as the cause.
 
+### Fresh deterministic-source companion
+
+This later experiment did not reuse the Registry Sync provider source ID. It
+used the versioned DD-002 companion source-ID format and retained all real
+values in local state.
+
+| Observation | Result | Status |
+| --- | --- | --- |
+| Earlier same-source pending result reconciled | Recorded as the already observed HTTP `500` permission-denial result | supported |
+| Fresh companion source differs from provider source | Yes; deterministic `committed-fleet:companion:v1` format used | supported |
+| Fresh companion registration POST | User reported `201 Created` and a returned Registration ID | supported |
+| GET by returned Registration ID | User reported successful readback | supported |
+| Blueprint and Agent Identity fields on readback | Matched the submitted Entra object IDs | supported |
+| Original Registry Sync Package after create | Read successfully; identity field remained equal to the pre-write value | supported |
+| Durable mapping | Provider source, Package, companion source, Registration, Blueprint, and Agent Identity references saved in local state | supported |
+| Provider runtime authentication | Not tested | inconclusive |
+| Governance enforcement | Not tested | inconclusive |
+| Cross-provider applicability | Only the selected GCP source was observed | inconclusive |
+| Fresh companion cleanup | Not yet reported | blocked |
+
+The successful result supports a separately managed companion pattern for
+further evaluation. It does not turn the companion into the Registry Sync
+record, make the Package ID a Registration ID, or establish production API
+support.
+
 After the failed replay, further writes were paused and pending-write evidence
 retained. The current
 boundary is backend authorization for the submitted association, not a proven

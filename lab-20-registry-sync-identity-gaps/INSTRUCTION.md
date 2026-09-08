@@ -1,5 +1,9 @@
 # Lab 20: Observe Registry Sync identity gaps
 
+The experiment's connection-name, companion source-ID, and durable mapping
+conventions are recorded in
+[Lab 20 design decisions](design-decisions.md).
+
 ## Experiment question
 
 For an existing third-party Registry Sync inventory record, which identity
@@ -34,8 +38,10 @@ from different angles and do not need to be run together.
 Both entry points retain the lab's non-production, approval, privacy, and
 cleanup boundaries. The [Stop condition](#stop-condition) below ends the
 initial read-only HTTP path; progressing to the separate notebook pilot
-is **not** implied authorization to write. The notebook defaults to
-`RUN_WRITES = False`; group approval and per-write confirmations remain.
+is **not** implied authorization to write. Review the notebook's top-level
+switches before running it. The current #113 working copy enables the approved
+fresh-companion experiment while keeping the earlier same-source
+`CREATE_COMPANION` path disabled.
 
 ## Current boundary (read-only HTTP walkthrough)
 

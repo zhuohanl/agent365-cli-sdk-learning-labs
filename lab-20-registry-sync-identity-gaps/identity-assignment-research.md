@@ -33,7 +33,7 @@ third-party runtime use it are three separate tasks.
 - **[Best available interim solution: step by step](#best-available-interim-solution-step-by-step)**
   - [How to read and use the steps](#how-to-read-and-use-the-steps)
   - [Step 1 - Create or reuse Registry Sync and choose the connection discovery path](#step-1---create-or-reuse-registry-sync-and-choose-the-connection-discovery-path)
-    - [Proposed connection naming convention](#proposed-connection-naming-convention)
+    - [Connection naming convention](#connection-naming-convention)
   - [Step 2 - Obtain the approved delegated Graph token and operator ID](#step-2---obtain-the-approved-delegated-graph-token-and-operator-id)
   - [Step 3 - List packages and follow every returned page](#step-3---list-packages-and-follow-every-returned-page)
   - [Step 4 - Read the original package and extract source metadata](#step-4---read-the-original-package-and-extract-source-metadata)
@@ -61,10 +61,11 @@ third-party runtime use it are three separate tasks.
 
 ## Recommendation
 
-**Do not base the 1-2 day customer demo on creating companion registrations
-for Registry Sync sources. Use read-only inventory evidence, or PATCH a
-separately known and verified user-owned registration. Do not roll automatic
-companion creation out as production onboarding.**
+**Do not treat a companion registration as an update to a Registry Sync
+record. One separately named GCP companion was created successfully in the
+bounded experiment, but use read-only inventory evidence for the original
+record and do not roll automatic companion creation out as production
+onboarding.**
 
 | Question | Answer |
 | --- | --- |
@@ -72,9 +73,10 @@ companion creation out as production onboarding.**
 | Can a package identify its Registry Sync connection? | Yes in the inspected GCP responses: parse the nested `definition` string and read `SourceIds.ConnectionId`. Match that exact value to known connection context; platform alone is insufficient. A public connection-management API and a cross-provider field guarantee remain unestablished. |
 | Can all connections and each connection's details be retrieved programmatically? | No documented complete connection-list or connection-details interface was found in the reviewed surfaces. However, GCP package metadata provides connection IDs, platform, project, and region: a useful partial inventory, not an authoritative connection list or full configuration. See the renewed review below. |
 | Can Path 2 find the correct existing registration from Package Details? | No publicly documented lookup or mapping was found. Discovering an ID would still leave write authority and sync persistence to establish. |
-| Should Path 1 work? | One historical first create returned `201`, but current minimal creates for four sampled GCP Registry Sync sources all returned the same backend permission denial despite the documented delegated scope. A deleted known registration could not be recreated with its original successful body. Do not depend on companion creation. |
+| Should a same-source Path 1 work? | One historical first create returned `201`, but current minimal creates for four sampled GCP Registry Sync sources all returned the same backend permission denial despite the documented delegated scope. A deleted known registration could not be recreated with its original successful body. Do not depend on same-source creation. |
+| Can a separately named fresh companion be created? | Yes in one bounded GCP observation: a deterministic source ID distinct from the provider source returned `201`, GET by the returned Registration ID succeeded, and the original Package remained unchanged. This is not production or cross-provider proof. |
 | Is there a third in-place assignment path? | None found in the reviewed public documentation. Entra-only association and SDK/runtime integration are alternatives with different outcomes, not hidden ways to update the synchronized record. |
-| What should be implemented now? | Approved manual Registry Sync setup if needed, then API-based inventory discovery and explicit source-to-identity mapping. PATCH only a separately known, verified, user-owned registration. When no supported lookup or known Registration ID exists, record the association as blocked and escalate; do not create, retry, or delete/recreate a companion. |
+| What should be implemented now? | Approved manual Registry Sync setup if needed, then API-based inventory discovery and explicit source-to-identity mapping. PATCH only a separately known, verified, user-owned registration. The fresh-companion pattern remains an explicitly gated experiment until its lifecycle, provider coverage, and production support are decided. |
 | Can the customer onboard the whole fleet with this workaround? | Not as a supported production solution: the Agent Registration API explicitly excludes production use, and original-record association, lifecycle behavior, and runtime integration remain unresolved. [A1] |
 
 If the requirement is specifically **"the original Registry Sync record must
@@ -696,7 +698,11 @@ exists, or use a package's display name/timestamps as connection details.
    requirement and obtain a supported interface from PG; do not replay
    private portal requests.
 
-#### Proposed connection naming convention
+#### Connection naming convention
+
+The consolidated decision, companion source-ID convention, and required
+mapping fields are recorded in
+[Lab 20 design decisions](design-decisions.md).
 
 Use a human-readable connection label with region before source scope:
 

@@ -102,3 +102,24 @@ Do not automatically retry POST or use delete-and-recreate as recovery. PATCH
 a known owned registration when available. Without a supported lookup and a
 known Registration ID, classify association as blocked and retain protected
 diagnostic evidence for product investigation.
+
+## Fresh companion observation
+
+For the later GCP experiment using a deterministic source ID that did not
+equal the Registry Sync provider source ID:
+
+```text
+companion_source_differs_from_provider_source=true
+companion_source_format=committed-fleet:companion:v1
+registration_create_status=supported
+registration_readback_status=supported
+original_package_identity_unchanged=true
+mapping_saved_locally=true
+runtime_binding=not-tested
+governance_enforcement=not-tested
+cross_provider_result=inconclusive
+cleanup_status=retained
+```
+
+This is evidence for one separately managed companion, not evidence that the
+original synchronized Package was updated.

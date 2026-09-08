@@ -212,7 +212,7 @@ requests.Session.request = lambda *args, **kwargs: (_ for _ in ()).throw(Asserti
 
 
 class NotebookTests(unittest.TestCase):
-    def test_template_is_clean_and_self_contained(self):
+    def test_notebook_is_self_contained(self):
         notebook = nbformat.read(NOTEBOOK, as_version=4)
         nbformat.validate(notebook)
         cells = {cell.id: cell for cell in notebook.cells}
@@ -236,6 +236,7 @@ class NotebookTests(unittest.TestCase):
         switch_names = {
             "RUN_WRITES", "CONFIRM_EACH_WRITE", "GROUPS_APPROVED", "AGENT_GROUP_APPROVED",
             "CREATE_BLUEPRINT", "CREATE_PRINCIPAL", "CREATE_IDENTITY", "CREATE_COMPANION",
+            "ACKNOWLEDGE_PRIOR_REGISTRATION_500", "CREATE_FRESH_COMPANION",
             "DELETE_OBJECT", "CONFIRMED_NO_DEPENDENTS", "CLEANUP_PLATFORM", "CLEANUP_GROUP",
         }
         self.assertEqual(assigned_names("configuration-variables"), variable_names)
@@ -245,8 +246,6 @@ class NotebookTests(unittest.TestCase):
         headings = []
         for cell in notebook.cells:
             if cell.cell_type == "code":
-                self.assertIsNone(cell.execution_count)
-                self.assertEqual(cell.outputs, [])
                 ast.parse(cell.source)
                 self.assertNotIn("registry_sync_workflow", cell.source)
                 self.assertNotIn("Workflow(", cell.source)
@@ -360,6 +359,93 @@ class NotebookTests(unittest.TestCase):
     def test_explicit_first_companion_create(self):
         self.execute(write=True, first_companion=True)
 
+    def test_fresh_companion_uses_distinct_source_and_saves_mapping(self):
+        notebook = nbformat.read(NOTEBOOK, as_version=4)
+        source = next(cell.source for cell in notebook.cells if cell.id == "part-3-fresh-companion-code")
+        inspect_source = next(cell.source for cell in notebook.cells if cell.id == "part-3-fresh-companion-inspect-code")
+        state = {
+            "operator_id": "operator",
+            "original_id": "registry-package",
+            "source_agent_id": "provider-source",
+            "original_before": {"agentIdentityId": None},
+            "pending_write": {"method": "POST", "record": "registration"},
+        }
+        calls = []
+
+        def request_graph(method, path, body=None, *, record=None, expected=None):
+            calls.append((method, path, body, record))
+            if method == "POST":
+                result = {"id": "fresh-registration", **body}
+                state[record] = result
+                return result
+            if path.startswith("/beta/copilot/agentRegistrations/"):
+                return state["fresh_companion_registration"]
+            return {"id": "registry-package", "agentIdentityId": None}
+
+        context = {
+            "state": state,
+            "ACKNOWLEDGE_PRIOR_REGISTRATION_500": True,
+            "CREATE_FRESH_COMPANION": True,
+            "RUN_WRITES": True,
+            "AGENT_GROUP_APPROVED": True,
+            "identity_verified": True,
+            "source": {
+                "CreatedDateTime": "2026-09-01T00:00:00Z",
+                "LastModifiedDateTime": "2026-09-02T00:00:00+00:00",
+            },
+            "blueprint": {"appId": "blueprint-app"},
+            "agent_identity": {"id": "agent-identity"},
+            "agent_platform": "GoogleVertexAI",
+            "TARGET_NAME": "Test V2",
+            "REGISTRATIONS": "/beta/copilot/agentRegistrations",
+            "PACKAGES": "/v1.0/copilot/admin/catalog/packages",
+            "DISCOVERY_SCOPES": ["CopilotPackages.Read.All"],
+            "ENTRA_READ_SCOPES": ["AgentIdentity.Read.All"],
+            "REGISTRATION_READ_SCOPES": ["AgentRegistration.Read.All"],
+            "quote": quote,
+            "request_graph": request_graph,
+            "sign_in": Mock(),
+            "save_state": Mock(),
+        }
+
+        with redirect_stdout(StringIO()):
+            exec(compile(source, "<part-3-fresh-companion-code>", "exec"), context)
+
+        post = next(call for call in calls if call[0] == "POST")
+        self.assertNotEqual(post[2]["sourceAgentId"], state["source_agent_id"])
+        self.assertEqual(
+            post[2]["sourceAgentId"],
+            "committed-fleet:companion:v1:gcp:provider-source",
+        )
+        self.assertEqual(post[3], "fresh_companion_registration")
+        self.assertEqual(
+            [method for method, _, _, _ in calls],
+            ["POST", "GET", "GET"],
+        )
+        self.assertEqual(state["failed_writes"]["registration_source_reuse"]["http_status"], 500)
+        self.assertNotIn("pending_write", state)
+        self.assertEqual(state["fresh_companion_mapping"], {
+            "platform": "GoogleVertexAI",
+            "providerSourceAgentId": "provider-source",
+            "packageId": "registry-package",
+            "companionSourceAgentId": post[2]["sourceAgentId"],
+            "companionRegistrationId": "fresh-registration",
+            "blueprintId": "blueprint-app",
+            "agentIdentityId": "agent-identity",
+        })
+        with redirect_stdout(StringIO()) as output:
+            exec(compile(inspect_source, "<part-3-fresh-companion-inspect-code>", "exec"), context)
+        self.assertEqual(calls[-1][0], "GET")
+        context["sign_in"].assert_called_once_with([
+            "CopilotPackages.Read.All",
+            "AgentIdentity.Read.All",
+            "AgentRegistration.Read.All",
+        ])
+        self.assertIn("'registration_readable': True", output.getvalue())
+        self.assertIn("'source_id_matches': True", output.getvalue())
+        self.assertNotIn("fresh-registration", output.getvalue())
+        self.assertNotIn("provider-source", output.getvalue())
+
     def test_unknown_write_cannot_be_retried(self):
         self.execute(write=True, unknown_write=True)
 
@@ -413,17 +499,29 @@ class NotebookTests(unittest.TestCase):
                         "assert not any(path.startswith(API + '/') for _, path, _ in _calls), 'Part 1 must not fetch Package Details.'\n"
                         + cell.source
                     )
-                if write:
-                    for name in ("RUN_WRITES", "GROUPS_APPROVED", "AGENT_GROUP_APPROVED", "CREATE_BLUEPRINT", "CREATE_PRINCIPAL", "CREATE_IDENTITY"):
-                        cell.source = cell.source.replace(name + " = False", name + " = True")
-                if confirm_writes:
-                    cell.source = cell.source.replace("CONFIRM_EACH_WRITE = False", "CONFIRM_EACH_WRITE = True")
+                if cell.id == "configuration-switches":
+                    switch_values = {
+                        "RUN_WRITES": write,
+                        "CONFIRM_EACH_WRITE": confirm_writes,
+                        "GROUPS_APPROVED": write,
+                        "AGENT_GROUP_APPROVED": write,
+                        "CREATE_BLUEPRINT": write,
+                        "CREATE_PRINCIPAL": write,
+                        "CREATE_IDENTITY": write,
+                        "CREATE_COMPANION": first_companion or bool(registration_failure),
+                        "ACKNOWLEDGE_PRIOR_REGISTRATION_500": False,
+                        "CREATE_FRESH_COMPANION": False,
+                    }
+                    for name, value in switch_values.items():
+                        cell.source = re.sub(
+                            rf"(?m)^{name} = (?:True|False)$",
+                            f"{name} = {value}",
+                            cell.source,
+                        )
                 if multiple_groups and cell.id == "configuration-variables":
                     cell.source = cell.source.replace("['test-v2-dev']", "['test-v2-dev', 'support-dev']")
                 if cell.id == "configuration-variables":
                     cell.source = cell.source.replace("SELECTED_BLUEPRINT_GROUP = 'test-v2-dev'", f"SELECTED_BLUEPRINT_GROUP = {selected_group!r}")
-                if first_companion or registration_failure:
-                    cell.source = cell.source.replace("CREATE_COMPANION = False", "CREATE_COMPANION = True")
                 if cleanup:
                     cell.source = cell.source.replace("DELETE_OBJECT = None", "DELETE_OBJECT = 'registration'")
                     cell.source = cell.source.replace("CONFIRMED_NO_DEPENDENTS = False", "CONFIRMED_NO_DEPENDENTS = True")
@@ -443,6 +541,16 @@ save_state()
 """
                 if registration_failure and cell.id == "setup-code":
                     cell.source += '\nstate["registration"] = {"id": COMPANION}\nsave_state()\n'
+            notebook.cells = [
+                cell for cell in notebook.cells
+                if cell.id not in (
+                    "1f83e7a2",
+                    "part-3-fresh-companion",
+                    "part-3-fresh-companion-code",
+                    "part-3-fresh-companion-inspect",
+                    "part-3-fresh-companion-inspect-code",
+                )
+            ]
             notebook.cells.insert(0, nbformat.v4.new_code_cell(
                 f"WRITE = {write!r}\nFIRST_COMPANION = {first_companion!r}\nREGISTRATION_FAILURE = {registration_failure!r}\nDENY_CONFIRMATION = {deny_confirmation!r}\n" + FIXTURE
                 + ("\n_objects.pop(SP_ROOT + '/' + PRINCIPAL + '/' + PR_TYPE)\n" if missing_principal else ""),

@@ -39,9 +39,20 @@ The proposed identity update remains blocked for Registry Sync because
 registration. The Registry Sync Package ID, provider source ID, and nested
 `ManagedBy` metadata have not been documented as valid substitutes.
 
-## Next bounded experiment
+## Fresh companion experiment
 
-A registration created with the same provider-native `SourceAgentId` produced
-a second Package instead of updating the Registry Sync Package. The original
-record remained unchanged. Creating a parallel registration is therefore not
-a supported enrichment mechanism for the synchronized record.
+On 2026-09-08, the experiment owner reported successful completion of the
+notebook's fresh-companion path:
+
+- the companion used a distinct deterministic source ID rather than the
+  provider-native `SourceAgentId`;
+- `POST /beta/copilot/agentRegistrations` returned `201`;
+- GET by the returned Registration ID succeeded;
+- the original Registry Sync Package remained unchanged; and
+- the source-to-package-to-registration mapping was saved in local state.
+
+This distinguishes the result from the failed same-source requests. It proves
+that one separately named, caller-managed companion could be created and read
+in the current experiment. It does not enrich the synchronized Package or
+establish production support, runtime authentication, governance enforcement,
+or a general cross-provider contract.
