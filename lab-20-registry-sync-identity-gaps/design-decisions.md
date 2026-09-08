@@ -4,6 +4,16 @@ These decisions turn the Lab 20 observations into stable experiment
 conventions. They are not Microsoft product contracts and do not establish
 that companion registration creation is supported in production.
 
+## Contents
+
+- [DD-001: Registry Sync platform connection names](#dd-001-registry-sync-platform-connection-names)
+- [DD-002: Companion source IDs](#dd-002-companion-source-ids)
+- [DD-003: Durable relationship mapping](#dd-003-durable-relationship-mapping)
+- [DD-004: Add lifecycle](#dd-004-add-lifecycle)
+- [DD-005: Delete lifecycle](#dd-005-delete-lifecycle)
+- [DD-006: Rename lifecycle](#dd-006-rename-lifecycle)
+- [Current boundaries](#current-boundaries)
+
 | ID | Decision | Status |
 | --- | --- | --- |
 | DD-001 | Use a consistent human-readable name for each Registry Sync platform connection. | Adopted local convention |
