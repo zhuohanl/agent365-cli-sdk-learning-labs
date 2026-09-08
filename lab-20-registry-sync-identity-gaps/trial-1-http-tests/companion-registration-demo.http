@@ -1,0 +1,313 @@
+# Lab 20: Fresh companion registration customer demo
+#
+# This REST Client walkthrough follows the successful notebook path:
+#
+#   Prep: acquire a delegated token and inspect inventory
+#   Part 1: verify the existing Blueprint and Blueprint principal
+#   Part 2: verify the Registry Sync Package and Agent Identity
+#   Part 3: inspect an existing companion, or create one exactly once
+#   Cleanup: optional and disabled by operator choice
+#
+# Run one request at a time. Never use "Send All".
+#
+# The normal customer demo is read-only:
+#   Prep -> Part 1 -> Part 2 -> Part 3A -> Part 4
+#
+# Skip Part 3B because this experiment already has a companion registration.
+# Use Part 3B only for a different, explicitly approved disposable source that
+# has no existing or unresolved companion mapping.
+#
+# Required delegated Microsoft Graph permissions:
+# - User.Read
+# - CopilotPackages.Read.All
+# - AgentIdentityBlueprint.Read.All
+# - AgentIdentityBlueprintPrincipal.Read.All
+# - AgentIdentity.Read.All
+# - AgentRegistration.Read.All
+# - AgentRegistration.ReadWrite.All (needed only for Part 3B and Cleanup)
+#
+# Put all real values in this folder's ignored .env file:
+#
+# A365_TENANT_ID=<directory-tenant-id>
+# A365_CLIENT_ID=<public-client-application-id>
+# A365_DEMO_TARGET_NAME=<selected-package-display-name>
+# A365_DEMO_ORIGINAL_PACKAGE_ID=<registry-sync-package-id>
+# A365_DEMO_PROVIDER_SOURCE_AGENT_ID=<exact-nested-source-agent-id>
+# A365_DEMO_SOURCE_CREATED_AT=<exact-source-created-timestamp>
+# A365_DEMO_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp>
+# A365_DEMO_BLUEPRINT_OBJECT_ID=<blueprint-application-object-id>
+# A365_DEMO_BLUEPRINT_APP_ID=<blueprint-app-id>
+# A365_DEMO_AGENT_IDENTITY_ID=<agent-identity-object-id>
+# A365_DEMO_COMPANION_REGISTRATION_ID=<successful-companion-registration-id>
+#
+# Preserve A365_DEMO_PROVIDER_SOURCE_AGENT_ID exactly as Registry Sync returned
+# it. Do not URL-decode and re-encode it.
+#
+# The companion source ID used by Part 3B is:
+#
+# committed-fleet:companion:v1:gcp:<exact-provider-source-agent-id>
+#
+# Never commit .env, token responses, raw responses, screenshots containing
+# identifiers, or the durable mapping.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@targetName = {{$dotenv A365_DEMO_TARGET_NAME}}
+@originalPackageId = {{$dotenv A365_DEMO_ORIGINAL_PACKAGE_ID}}
+@providerSourceAgentId = {{$dotenv A365_DEMO_PROVIDER_SOURCE_AGENT_ID}}
+@sourceCreatedAt = {{$dotenv A365_DEMO_SOURCE_CREATED_AT}}
+@sourceModifiedAt = {{$dotenv A365_DEMO_SOURCE_MODIFIED_AT}}
+@blueprintObjectId = {{$dotenv A365_DEMO_BLUEPRINT_OBJECT_ID}}
+@blueprintAppId = {{$dotenv A365_DEMO_BLUEPRINT_APP_ID}}
+@agentIdentityId = {{$dotenv A365_DEMO_AGENT_IDENTITY_ID}}
+@companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@readAccessToken = {{$aadV2Token scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentityBlueprint.Read.All,https://graph.microsoft.com/AgentIdentityBlueprintPrincipal.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+@writeAccessToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentityBlueprint.Read.All,https://graph.microsoft.com/AgentIdentityBlueprintPrincipal.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All,https://graph.microsoft.com/AgentRegistration.ReadWrite.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+
+###############################################################################
+# Prep 1 - Confirm the signed-in operator
+#
+# Sending this first request triggers REST Client authentication. Version
+# 0.25.1 opens the browser and copies a device code to the clipboard; it does
+# not use the notebook's localhost authorization-code callback.
+#
+# REST Client caches the read token in memory for the other read requests.
+# If a later request returns 401, clear the REST Client Azure AD token cache
+# or restart VS Code, then send this request again.
+#
+# The optional POST and DELETE use a separate token expression and request
+# AgentRegistration.ReadWrite.All only when one of those requests is sent.
+#
+# Expected: 200. Keep the returned user ID private.
+
+# @name demoCurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Prep 2 - List Package inventory
+#
+# Expected: 200. Find the configured target only for visual confirmation.
+# The remaining requests use the exact IDs from the ignored .env and do not
+# match objects by display name.
+
+# @name demoListPackages
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.1 - Read the existing Blueprint
+#
+# Expected: 200.
+# Confirm:
+# - id equals A365_DEMO_BLUEPRINT_OBJECT_ID
+# - appId equals A365_DEMO_BLUEPRINT_APP_ID
+
+# @name demoGetBlueprint
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.2 - Read the Blueprint principal by Blueprint appId
+#
+# Expected: 200.
+# Confirm:
+# - appId equals A365_DEMO_BLUEPRINT_APP_ID
+# - accountEnabled is not false
+#
+# The Blueprint object ID and Blueprint appId are different identifiers.
+
+# @name demoGetBlueprintPrincipal
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 2.1 - Read the original Registry Sync Package
+#
+# Expected: 200.
+# Confirm:
+# - id equals A365_DEMO_ORIGINAL_PACKAGE_ID
+# - displayName equals A365_DEMO_TARGET_NAME
+# - platform is GoogleVertexAI
+# - the nested definition contains the exact provider source ID
+# - the nested SourceIds identify a Connected Platform GCP record
+# - agentIdentityId remains absent or null
+#
+# This Package ID is not the companion Registration ID.
+
+# @name demoGetOriginalPackageBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 2.2 - Read the existing Agent Identity
+#
+# Expected: 200.
+# Confirm:
+# - id equals A365_DEMO_AGENT_IDENTITY_ID
+# - agentIdentityBlueprintId equals A365_DEMO_BLUEPRINT_APP_ID
+# - servicePrincipalType is ServiceIdentity
+
+# @name demoGetAgentIdentity
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 3A - Read the already-created fresh companion
+#
+# This is the normal customer-demo path. It is read-only.
+#
+# Expected: 200.
+# Confirm:
+# - id equals A365_DEMO_COMPANION_REGISTRATION_ID
+# - sourceAgentId starts with committed-fleet:companion:v1:gcp:
+# - everything after that prefix equals the exact provider source agent ID
+# - originatingStore is GoogleVertexAI
+# - createdBy and ownerIds include the approved operator
+# - agentIdentityBlueprintId equals A365_DEMO_BLUEPRINT_APP_ID
+# - agentIdentityId equals A365_DEMO_AGENT_IDENTITY_ID
+# - managedByAppId is absent or empty
+
+# @name demoGetExistingCompanion
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Part 3B - OPTIONAL one-time fresh companion creation
+#
+# DO NOT SEND THIS REQUEST during the normal customer demo.
+#
+# Send it only when all of the following are true:
+# - the target is a different approved disposable source;
+# - no companion mapping or unresolved earlier POST exists for that source;
+# - the Blueprint and Agent Identity above were verified;
+# - the operator has explicitly approved one creation attempt; and
+# - A365_DEMO_COMPANION_REGISTRATION_ID is empty because no companion exists.
+#
+# Expected success: 201 with a new Registration ID.
+#
+# On timeout, 5xx, or another unexpected response, stop. Do not send it again.
+# On 201, immediately save the returned Registration ID in protected local
+# state and set A365_DEMO_COMPANION_REGISTRATION_ID before a later session.
+#
+# sourceAgentId deliberately differs from the Registry Sync source ID:
+#
+# committed-fleet:companion:v1:gcp:{{providerSourceAgentId}}
+
+# @name demoCreateFreshCompanion
+POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{writeAccessToken}}
+Content-Type: application/json
+Accept: application/json
+OData-Version: 4.0
+
+{
+  "displayName": "{{targetName}} - managed companion",
+  "description": "Disposable independently managed companion registration",
+  "createdBy": "{{demoCurrentUser.response.body.$.id}}",
+  "ownerIds": [
+    "{{demoCurrentUser.response.body.$.id}}"
+  ],
+  "sourceAgentId": "committed-fleet:companion:v1:gcp:{{providerSourceAgentId}}",
+  "originatingStore": "GoogleVertexAI",
+  "sourceCreatedDateTime": "{{sourceCreatedAt}}",
+  "sourceLastModifiedDateTime": "{{sourceModifiedAt}}",
+  "agentIdentityBlueprintId": "{{blueprintAppId}}",
+  "agentIdentityId": "{{agentIdentityId}}"
+}
+
+###
+
+###############################################################################
+# Part 3B.1 - Read a companion immediately after the optional POST
+#
+# Run only after Part 3B returned 201 in this REST Client session.
+# It uses the ID from that named response and does not use the .env ID.
+
+# @name demoGetNewCompanion
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{demoCreateFreshCompanion.response.body.$.id}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Part 4 - Re-read the original Registry Sync Package
+#
+# Expected: 200.
+# Compare with Part 2.1 and confirm the original Package identity field did not
+# change. A successful companion does not enrich the Registry Sync Package.
+
+# @name demoGetOriginalPackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Mapping checkpoint - no request
+#
+# Keep this relationship in protected state:
+#
+# platform                     = GoogleVertexAI
+# providerSourceAgentId        = A365_DEMO_PROVIDER_SOURCE_AGENT_ID
+# packageId                    = A365_DEMO_ORIGINAL_PACKAGE_ID
+# companionSourceAgentId       = committed-fleet:companion:v1:gcp:<provider-source>
+# companionRegistrationId      = A365_DEMO_COMPANION_REGISTRATION_ID
+# blueprintId                  = A365_DEMO_BLUEPRINT_APP_ID
+# agentIdentityId              = A365_DEMO_AGENT_IDENTITY_ID
+#
+# The deterministic companion source ID helps an operator understand the
+# relationship, but it does not replace the durable Registration ID mapping.
+
+###############################################################################
+# Cleanup - OPTIONAL and irreversible
+#
+# Keep the following DELETE request unsent unless cleanup is explicitly
+# approved and no dependent demonstration or experiment needs the companion.
+# It deletes only A365_DEMO_COMPANION_REGISTRATION_ID.
+
+# @name demoDeleteExistingCompanion
+DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+Authorization: Bearer {{writeAccessToken}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Cleanup verification
+#
+# Run only after the optional DELETE returned 204.
+# Expected: 404.
+
+# @name demoConfirmCompanionDeleted
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+OData-Version: 4.0

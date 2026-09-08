@@ -21,8 +21,23 @@ from different angles and do not need to be run together.
    separate
    [`registration-index.http`](trial-1-http-tests/registration-index.http) and
    [`registration-create-correlation.http`](trial-1-http-tests/registration-create-correlation.http)
-   experiments described below. The correlation experiment includes a
-   separately approved write; it is not part of the initial read-only path.
+   experiments described below. For a customer-facing walkthrough of the
+   successful fresh-companion path, use
+   [`companion-registration-demo.http`](trial-1-http-tests/companion-registration-demo.http).
+   The follow-on lifecycle experiments are
+   [`companion-registration-demo-rename.http`](trial-1-http-tests/companion-registration-demo-rename.http)
+   and
+   [`companion-registration-demo-delete.http`](trial-1-http-tests/companion-registration-demo-delete.http).
+   Both start with read-only proof and place every write after an explicit stop
+   checkpoint. The rename experiment must establish whether the exact provider
+   source ID survives a provider rename before updating companion labels. The
+   delete experiment must establish confirmed provider deletion, healthy
+   Registry Sync absence, and dependency review before retiring anything.
+   The companion creation demo's normal route is read-only; its separately
+   marked POST and DELETE requests must be skipped unless independently
+   approved. The correlation
+   experiment includes a separately approved write; it is not part of the
+   initial read-only path.
    No Python, fixture, or hidden matching logic is
    involved; every request and response is inspected by hand, one step at
    a time.
@@ -74,6 +89,17 @@ A365_SAMPLE_PACKAGE_ID=
 The repository ignores `.env`. Never put real values into
 `trial-1-http-tests/index.http`,
 tracked Markdown, chat, an issue, or a screenshot.
+
+The fresh-companion customer demo uses additional `A365_DEMO_*` values listed
+at the top of
+[`companion-registration-demo.http`](trial-1-http-tests/companion-registration-demo.http).
+Keep them in the same ignored `.env`. For the already-created companion, run
+the file's read-only route and skip its Part 3B POST. The installed REST Client
+uses its cached `aadV2Token` helper: the normal route requests only read
+permissions, while the optional POST and DELETE request write permission only
+when sent. The helper opens a browser and handles the token, but its delegated
+flow still uses a device code internally. Use the notebook when an actual
+localhost browser-callback login is required.
 
 ## Walkthrough
 

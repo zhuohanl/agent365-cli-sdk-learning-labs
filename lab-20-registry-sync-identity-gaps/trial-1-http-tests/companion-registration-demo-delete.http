@@ -1,0 +1,310 @@
+# Lab 20: Companion registration delete experiment
+#
+# Question:
+# After an approved disposable GCP source agent is deleted and Registry Sync
+# confirms its absence, can the mapped companion Registration and its dedicated
+# Agent Identity be retired safely and independently?
+#
+# Run one request at a time. Never use "Send All".
+#
+# Parts 1 and 2 are read-only. Parts 3 and 4 are optional, destructive, and
+# require separate approval. Registration deletion is irreversible.
+# Agent Identity deletion is soft deletion; it is not permanent purge.
+#
+# Put all real values in this folder's ignored .env file:
+#
+# A365_TENANT_ID=<directory-tenant-id>
+# A365_CLIENT_ID=<public-client-application-id>
+# A365_DEMO_ORIGINAL_PACKAGE_ID=<registry-sync-package-id>
+# A365_DEMO_PROVIDER_SOURCE_AGENT_ID=<exact-provider-source-agent-id>
+# A365_DEMO_BLUEPRINT_APP_ID=<platform-blueprint-app-id>
+# A365_DEMO_AGENT_IDENTITY_ID=<dedicated-agent-identity-id>
+# A365_DEMO_COMPANION_REGISTRATION_ID=<companion-registration-id>
+#
+# This file never deletes the platform Blueprint or Registry Sync connection.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@originalPackageId = {{$dotenv A365_DEMO_ORIGINAL_PACKAGE_ID}}
+@expectedSourceAgentId = {{$dotenv A365_DEMO_PROVIDER_SOURCE_AGENT_ID}}
+@blueprintAppId = {{$dotenv A365_DEMO_BLUEPRINT_APP_ID}}
+@agentIdentityId = {{$dotenv A365_DEMO_AGENT_IDENTITY_ID}}
+@companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@readAccessToken = {{$aadV2Token scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+@dependencyReadToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/Application.Read.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+@registrationDeleteToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All,https://graph.microsoft.com/AgentRegistration.ReadWrite.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+@identityDeleteToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentIdentity.DeleteRestore.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+
+###############################################################################
+# Part 1.1 - Confirm the signed-in operator
+#
+# Expected: 200. Sending this request triggers REST Client authentication.
+
+# @name deleteCurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.2 - Capture complete Package inventory before provider deletion
+#
+# Expected: 200. Read every returned page and locate the original Package using
+# its exact scoped provider source key, not display name alone.
+
+# @name deleteListPackagesBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.3 - Capture the original Registry Sync Package
+#
+# Expected: 200. Confirm its nested provider sourceAgentId equals the exact
+# value saved in A365_DEMO_PROVIDER_SOURCE_AGENT_ID.
+
+# @name deleteGetOriginalPackageBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.4 - Capture the mapped companion Registration
+#
+# Expected: 200.
+# Confirm:
+# - ID equals A365_DEMO_COMPANION_REGISTRATION_ID
+# - sourceAgentId equals
+#   committed-fleet:companion:v1:gcp:<exact-provider-source-id>
+# - Blueprint and Agent Identity links match the durable mapping
+
+# @name deleteGetRegistrationBefore
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Part 1.5 - Capture the mapped Agent Identity
+#
+# Expected: 200. Confirm the ID and Blueprint appId match the mapping.
+
+# @name deleteGetIdentityBefore
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.6 - OPTIONAL inspect direct app-role assignments
+#
+# This documented service-principal relationship requires the separately
+# consented Application.Read.All permission. Do not request broader permission
+# solely to make this experiment pass. If this read is not already approved,
+# classify dependency inspection as unavailable and stop before deletion.
+#
+# Expected when approved: 200. A non-empty response requires dependency
+# review; it is not authorization to remove assignments or delete the identity.
+
+# @name deleteGetIdentityAppRoleAssignments
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/appRoleAssignments
+Authorization: Bearer {{dependencyReadToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.7 - Inspect direct directory memberships
+#
+# Expected: 200. Record only safe counts/classifications in tracked evidence.
+
+# @name deleteGetIdentityMemberships
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity/memberOf?$select=id,displayName
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Manual provider checkpoint - no request
+#
+# Only with explicit approval, delete the existing disposable GCP source agent
+# through its supported provider interface.
+#
+# Record private provider evidence, then wait for:
+# - a successful Registry Sync cycle;
+# - the agreed propagation/grace period; and
+# - a healthy connection with no permission or connector errors.
+#
+# Provider deletion alone does not authorize companion cleanup. Continue with
+# the read-only Registry Sync observations below.
+
+###############################################################################
+# Part 2.1 - Read complete Package inventory after provider deletion and sync
+#
+# Expected: 200. Read every page.
+#
+# Search by the exact scoped provider source key:
+# - If the same key has a new Package ID, update the mapping and STOP.
+# - If the original Package or another matching source remains, STOP.
+# - If inventory is partial or the connector is unhealthy, STOP.
+
+# @name deleteListPackagesAfterSourceDeletion
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 2.2 - Probe the previous Package ID
+#
+# Expected only after confirmed source deletion: 404.
+#
+# A 200 means the Package still exists and cleanup must stop. A 404 by itself
+# is not sufficient; Part 2.1, sync health, grace period, and provider evidence
+# must also agree.
+
+# @name deleteGetOriginalPackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop A - confirm source retirement before deleting companion objects
+#
+# Continue only when all conditions are true:
+# - the provider confirms the exact disposable source agent was deleted;
+# - successful Registry Sync plus the grace period confirms the scoped source
+#   key is absent from every Package List page;
+# - no replacement Package exists for the same source key;
+# - the mapping still identifies exactly one companion Registration and Agent
+#   Identity for that source;
+# - no other active mapping references either object;
+# - runtime use, grants, policies, memberships, owners, and other dependencies
+#   have been reviewed; and
+# - separate Registration retirement approval has been recorded.
+#
+# Otherwise mark reconciliation-required and stop.
+
+###############################################################################
+# Part 3.1 - OPTIONAL irreversible companion Registration deletion
+#
+# Do not send during evidence gathering.
+# Expected: 204.
+
+# @name deleteCompanionRegistration
+DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+Authorization: Bearer {{registrationDeleteToken}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Part 3.2 - Confirm the Registration is gone
+#
+# Run only after Part 3.1 returned 204.
+# Expected: 404.
+
+# @name deleteGetRegistrationAfter
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Part 3.3 - Observe Package inventory after Registration deletion
+#
+# Expected: 200. Do not assume the companion Package disappears immediately
+# or that its lifecycle matches the original Registry Sync Package.
+
+# @name deleteListPackagesAfterRegistrationDeletion
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 3.4 - Confirm the Agent Identity still exists independently
+#
+# Expected: 200. Registration deletion does not prove that Agent Identity
+# deletion is safe or automatic.
+
+# @name deleteGetIdentityAfterRegistrationDeletion
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop B - separately approve Agent Identity retirement
+#
+# Continue only when:
+# - Part 3.1 and Part 3.2 proved Registration deletion;
+# - Package observations have been recorded;
+# - the Agent Identity was created exclusively for this source;
+# - no runtime binding, app-role assignment, membership, grant, policy, owner
+#   workflow, or other consumer still requires it; and
+# - Agent Identity retirement approval has been recorded.
+#
+# Keep the platform Blueprint. Do not delete it as per-agent cleanup.
+
+###############################################################################
+# Part 4.1 - OPTIONAL Agent Identity soft deletion
+#
+# Expected: 204. This does not permanently purge the directory object.
+
+# @name deleteAgentIdentity
+DELETE {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{identityDeleteToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 4.2 - Confirm the active Agent Identity is gone
+#
+# Run only after Part 4.1 returned 204.
+# Expected: 404 from the active typed resource.
+#
+# Do not interpret this as permanent purge. Retain the ID and deletion
+# timestamp in the tombstone for restore, retention, and audit decisions.
+
+# @name deleteGetIdentityAfter
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{readAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Final tombstone checkpoint - no request
+#
+# Preserve:
+# - tenant, platform, provider scope, and exact provider sourceAgentId
+# - former Package, companion Registration, Agent Identity, and Blueprint IDs
+# - provider deletion and Registry Sync confirmation timestamps
+# - Registration DELETE/GET outcomes
+# - Agent Identity DELETE/GET outcomes
+# - dependency-review and approval references
+# - final status and any partial or inconclusive result
+#
+# Do not erase the mapping. It prevents stale inventory from silently creating
+# a replacement companion. Do not delete the shared platform Blueprint,
+# Registry Sync connection, provider credentials, or unrelated local evidence.
