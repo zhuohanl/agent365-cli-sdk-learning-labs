@@ -124,7 +124,8 @@ values in local state.
 | Observation | Result | Status |
 | --- | --- | --- |
 | Earlier same-source pending result reconciled | Recorded as the already observed HTTP `500` permission-denial result | supported |
-| Fresh companion source differs from provider source | Yes; deterministic `committed-fleet:companion:v1` format used | supported |
+| Fresh companion source differs from provider source | Yes; the experiment used the now-legacy `committed-fleet:companion:v1` format | supported |
+| Current companion namespace | New companions use `agent-governance:companion:v1`; the existing experimental Registration retains its exact legacy value | design decision |
 | Fresh companion registration POST | User reported `201 Created` and a returned Registration ID | supported |
 | GET by returned Registration ID | User reported successful readback | supported |
 | Blueprint and Agent Identity fields on readback | Matched the submitted Entra object IDs | supported |
@@ -203,8 +204,9 @@ selected agent's identity with it.
 ### Prepared authentication-flow control (not yet sent)
 
 A private ignored copy of
-`trial-1-http-tests/registration-create-correlation.http` was prepared under
-`evidence/trial-2-jupyter-notebook/` for today's selected source. It preserves
+`experiments/02-provider-source-registration-create/experiment.http`
+was prepared under
+`evidence/notebook-pilot/` for today's selected source. It preserves
 the earlier successful device-code
 delegated authentication flow, registration write scope, `/me` creator/owner
 binding, and identity-free user-owned POST shape. Today's exact package,

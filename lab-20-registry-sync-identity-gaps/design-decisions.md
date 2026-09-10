@@ -17,7 +17,7 @@ that companion registration creation is supported in production.
 | ID | Decision | Status |
 | --- | --- | --- |
 | DD-001 | Use a consistent human-readable name for each Registry Sync platform connection. | Adopted local convention |
-| DD-002 | Derive a companion source ID from the exact provider source ID. | Successful in one GCP experiment; production support unresolved |
+| DD-002 | Derive a companion source ID from the exact provider source ID. | Adopted from GCP creation and connection-recreation evidence; production and cross-provider support unresolved |
 | DD-003 | Keep a durable source-to-package-to-registration mapping even when the companion source ID is reversible. | Required |
 | DD-004 | Add identities through one platform-level Blueprint step followed by a per-Package Agent Identity and companion Registration loop. | Experiment-derived implementation rule; production support unresolved |
 | DD-005 | Treat source disappearance as a reconciliation signal and retire the companion Registration before its dedicated Agent Identity. | Experiment-derived implementation rule; production support unresolved |
@@ -83,7 +83,7 @@ Do not use a random UUID as the complete companion source ID. Derive a stable,
 recognizable value from the exact Registry Sync provider source ID:
 
 ```text
-committed-fleet:companion:v1:<platform-code>:<original-source-agent-id>
+agent-governance:companion:v1:<platform-code>:<original-source-agent-id>
 ```
 
 Use these local platform codes:
@@ -98,13 +98,16 @@ Use these local platform codes:
 Synthetic GCP example:
 
 ```text
-committed-fleet:companion:v1:gcp:projects%2fdemo-project%2flocations%2fus-central1%2freasoningEngines%2f123456789
+agent-governance:companion:v1:gcp:projects%2fdemo-project%2flocations%2fus-central1%2freasoningEngines%2f123456789
 ```
 
-The fixed prefix identifies a committed-fleet companion, `v1` versions the
-format, and the platform code limits cross-provider ambiguity. Everything
-after the platform-code separator is the exact provider source ID observed
-from Registry Sync.
+The fixed prefix identifies a companion owned by the customer-wide agent
+governance capability, `v1` versions the format, and the platform code limits
+cross-provider ambiguity. The namespace deliberately does not encode a
+committed fleet, rollout wave, or demonstration cohort because those are
+selection and delivery concepts rather than the solution's applicability
+boundary. Everything after the platform-code separator is the exact provider
+source ID observed from Registry Sync.
 
 Preserve that source value byte-for-byte:
 
@@ -128,8 +131,40 @@ is rejected specifically because of length or characters, define a separate
 versioned decision such as:
 
 ```text
-committed-fleet:companion:v2:<platform-code>:sha256:<digest>
+agent-governance:companion:v2:<platform-code>:sha256:<digest>
 ```
+
+The earlier GCP experiment created one Registration with the legacy
+`committed-fleet:companion:v1` prefix. Preserve that exact observed value in
+its durable mapping. Do not delete or recreate the Registration solely to
+rename the namespace. New companion Registrations use
+`agent-governance:companion:v1`.
+
+### Evidence confirming the identity anchor
+
+The GCP stability experiment compared the exact provider source ID, Registry
+Sync connection ID, and Package ID across three controlled events:
+
+| Event | Provider source ID | Connection ID | Package ID | Interpretation |
+| --- | --- | --- | --- | --- |
+| No-change sync | Unchanged | Unchanged | Unchanged | Control only; both identity candidates survived. |
+| Provider display-name rename | Unchanged | Unchanged | Unchanged | Rename is metadata-only but does not distinguish the candidates. |
+| Delete and recreate the Registry Sync connection while retaining the provider agent | Unchanged | Changed | Changed | The provider source survived rematerialization while the connection and inventory representations did not. |
+
+After connection deletion, the target Package count changed from one to zero.
+After connection recreation and a successful sync, exactly one matching target
+returned under a new Package ID; the old Package did not remain as a duplicate.
+
+Continue using the DD-002 companion source ID derived from the exact scoped
+provider source ID. Do not derive it from either the current Package ID or the
+Registry Sync connection ID. Those values remain useful mapping and provenance
+fields, but the experiment demonstrated that they can change while the
+provider agent remains the same.
+
+This conclusion is evidence-backed only for the tested Google Vertex AI
+connection lifecycle. AWS, Salesforce, and Anthropic must each be observed
+independently before treating the same stability behavior as cross-provider
+fact.
 
 ## DD-003: Durable relationship mapping
 
@@ -366,7 +401,7 @@ Use this reconciliation sequence:
 4. Keep the existing platform Blueprint, Agent Identity ID, companion source
    ID, and companion Registration ID.
 5. Calculate the intended companion display name from the new source display
-   name and the committed-fleet naming convention. Do not reconstruct or
+   name and the companion display-name convention. Do not reconstruct or
    modify the companion source ID.
 6. GET the mapped Agent Identity and companion Registration and verify their
    IDs, Blueprint relationship, source relationship, and ownership before
@@ -462,12 +497,15 @@ is not treated as a cosmetic rename.
   denial for the sampled GCP records.
 - One GCP fresh-companion POST using the DD-002 source ID returned `201`, and
   GET by the returned Registration ID succeeded.
+- Recreating the tested GCP Registry Sync connection retained the exact
+  provider source ID but produced a different connection ID and Package ID.
+  The restored inventory contained exactly one matching target.
 - The original Registry Sync Package remained unchanged after that create.
 - A successful companion does not enrich the original Registry Sync Package
   or prove provider-runtime authentication or governance enforcement.
 - Registry Sync connection creation and complete connection-detail retrieval
   remain manual or unavailable through the reviewed public interfaces.
-- The add and delete flows above are committed-fleet handling decisions derived
+- The add and delete flows above are implementation handling decisions derived
   from the experiment. They are not documented Microsoft lifecycle contracts.
 - Microsoft documents `displayName` updates for both Agent Identity and Agent
   Registration, but Lab 20 has not yet run an end-to-end provider rename and

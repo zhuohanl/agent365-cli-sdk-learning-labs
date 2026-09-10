@@ -110,7 +110,9 @@ equal the Registry Sync provider source ID:
 
 ```text
 companion_source_differs_from_provider_source=true
-companion_source_format=committed-fleet:companion:v1
+companion_source_format_observed=committed-fleet:companion:v1
+companion_source_format_status=legacy
+current_companion_source_format=agent-governance:companion:v1
 registration_create_status=supported
 registration_readback_status=supported
 original_package_identity_unchanged=true

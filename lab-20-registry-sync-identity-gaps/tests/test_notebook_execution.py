@@ -18,7 +18,7 @@ from nbclient.exceptions import CellExecutionError
 
 
 LAB = Path(__file__).resolve().parents[1]
-NOTEBOOK = LAB / "trial-2-jupyter-notebook" / "registry_sync_identity_walkthrough.ipynb"
+NOTEBOOK = LAB / "notebook-pilot" / "registry_sync_identity_walkthrough.ipynb"
 
 FIXTURE = r"""
 import json, getpass, requests, msal
@@ -415,7 +415,7 @@ class NotebookTests(unittest.TestCase):
         self.assertNotEqual(post[2]["sourceAgentId"], state["source_agent_id"])
         self.assertEqual(
             post[2]["sourceAgentId"],
-            "committed-fleet:companion:v1:gcp:provider-source",
+            "agent-governance:companion:v1:gcp:provider-source",
         )
         self.assertEqual(post[3], "fresh_companion_registration")
         self.assertEqual(
@@ -491,7 +491,7 @@ class NotebookTests(unittest.TestCase):
                 if cell.cell_type != "code":
                     continue
                 cell.source = cell.source.replace(
-                    "PRIVATE = LAB_ROOT / 'evidence' / 'trial-2-jupyter-notebook'",
+                    "PRIVATE = LAB_ROOT / 'evidence' / 'notebook-pilot'",
                     f"PRIVATE = Path({temporary!r})",
                 ).replace("from getpass import getpass", "getpass = fake_prompt")
                 if cell.id == "part-2-package-code":

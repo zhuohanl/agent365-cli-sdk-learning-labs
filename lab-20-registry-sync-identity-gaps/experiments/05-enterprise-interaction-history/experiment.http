@@ -1,0 +1,123 @@
+# Ad-hoc: Read Microsoft 365 Copilot enterprise interaction history
+#
+# This file resolves the signed-in user's ID, then calls:
+#
+# GET https://graph.microsoft.com/beta/copilot/users/{userId}/interactionHistory/getAllEnterpriseInteractions
+#
+# Run one request at a time. Never use "Send All".
+#
+# Important authorization boundary:
+# - GET /me uses a delegated User.Read token only to resolve your own user ID.
+# - getAllEnterpriseInteractions does not support delegated permissions.
+# - The token request uses a separate confidential application.
+# - The history request requires an application token with the
+#   AiEnterpriseInteraction.Read.All application permission and admin consent.
+# - Targeting your own user ID does not remove the application-permission
+#   requirement.
+#
+# The target user needs a valid Microsoft 365 Copilot license with the
+# Microsoft Copilot with Graph-grounded chat service plan.
+#
+# Manually put these values in the shared ignored ../../.env file:
+#
+# A365_TENANT_ID=<directory-tenant-id>
+# A365_CLIENT_ID=<public-client-application-id-used-for-browser-sign-in>
+# A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_ID=<confidential-app-client-id>
+# A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_SECRET_URLENCODED=<URL-encoded-secret>
+#
+# Use the client secret value, not its secret ID. URL-encode the complete value
+# before writing it to .env so characters such as +, &, =, or % cannot change
+# the form body. Keep .env ignored and remove the secret after the experiment.
+#
+# The token response is sensitive and short-lived. Do not save its response.
+# Clear REST Client request history after the experiment because both the
+# client secret request and access-token response may remain in local history.
+#
+# The response can contain user prompts, Copilot responses, meeting and file
+# references, URLs, participant identifiers, and other confidential data.
+# Do not commit, paste into chat or an issue, or capture identifying
+# screenshots. Save any required raw response only under the ignored evidence
+# directory.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@applicationClientId = {{$dotenv A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_ID}}
+@applicationClientSecretUrlEncoded = {{$dotenv A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_SECRET_URLENCODED}}
+@graphBaseUrl = https://graph.microsoft.com
+@delegatedUserToken = {{$aadV2Token scopes:https://graph.microsoft.com/User.Read tenantId:{{tenantId}} clientId:{{clientId}}}}
+
+###############################################################################
+# Part 1 - Resolve your own Microsoft Entra user ID
+#
+# Sending this request triggers REST Client's browser-assisted delegated sign
+# in. Expected: 200.
+#
+# Keep the returned ID private. The next request uses only the ID from this
+# named response; no user ID needs to be copied into the tracked file.
+
+# @name interactionHistoryCurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{delegatedUserToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 2 - Acquire the app-only Microsoft Graph token
+#
+# Before sending:
+# - configure AiEnterpriseInteraction.Read.All as an application permission on
+#   A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_ID;
+# - grant tenant admin consent; and
+# - manually add the confidential app client ID and URL-encoded client secret
+#   to the shared ignored ../../.env file.
+#
+# Expected: 200 with token_type Bearer and an access_token.
+# Do not save or share the response.
+
+# @name acquireEnterpriseInteractionsAppToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+client_id={{applicationClientId}}&client_secret={{applicationClientSecretUrlEncoded}}&scope=https%3A%2F%2Fgraph.microsoft.com%2F.default&grant_type=client_credentials
+
+###
+
+###############################################################################
+# Part 3 - Get all enterprise interactions for the signed-in user
+#
+# This is the requested beta request. It uses the app-only token from the
+# Part 2 response, not the delegated token from Part 1.
+#
+# Expected when authorized and licensed: 200 with a collection of
+# aiInteraction objects.
+#
+# Interpret common failures carefully:
+# - 401: token missing, malformed, or expired.
+# - 403: application permission/admin consent/license or another authorization
+#   requirement is not satisfied.
+# - 404: do not conclude that the user has no interactions; record the exact
+#   safe error class and recheck the target ID and endpoint availability.
+#
+# If @odata.nextLink is present, follow one page at a time using the URL
+# returned by Graph. Do not publish that URL because it can contain sensitive
+# query state.
+
+# @name getMyEnterpriseInteractionsBeta
+GET {{graphBaseUrl}}/beta/copilot/users/{{interactionHistoryCurrentUser.response.body.$.id}}/interactionHistory/getAllEnterpriseInteractions
+Authorization: Bearer {{acquireEnterpriseInteractionsAppToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 4 - OPTIONAL documented v1.0 comparison
+#
+# Microsoft currently documents both beta and v1.0. Use this only when a
+# stable-version comparison is useful. The recommended page size is 100.
+
+# @name getMyEnterpriseInteractionsV1
+GET {{graphBaseUrl}}/v1.0/copilot/users/{{interactionHistoryCurrentUser.response.body.$.id}}/interactionHistory/getAllEnterpriseInteractions?$top=100
+Authorization: Bearer {{acquireEnterpriseInteractionsAppToken.response.body.$.access_token}}
+Accept: application/json

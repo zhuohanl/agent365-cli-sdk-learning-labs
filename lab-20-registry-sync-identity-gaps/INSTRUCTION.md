@@ -16,33 +16,18 @@ This lab has two independent entry points. Use whichever matches what you
 are trying to learn or demonstrate; they document the same API surface
 from different angles and do not need to be run together.
 
-1. **Trial 1: HTTP walkthroughs** - the read-only
-   [`trial-1-http-tests/index.http`](trial-1-http-tests/index.http), plus the
-   separate
-   [`registration-index.http`](trial-1-http-tests/registration-index.http) and
-   [`registration-create-correlation.http`](trial-1-http-tests/registration-create-correlation.http)
-   experiments described below. For a customer-facing walkthrough of the
-   successful fresh-companion path, use
-   [`companion-registration-demo.http`](trial-1-http-tests/companion-registration-demo.http).
-   The follow-on lifecycle experiments are
-   [`companion-registration-demo-rename.http`](trial-1-http-tests/companion-registration-demo-rename.http)
-   and
-   [`companion-registration-demo-delete.http`](trial-1-http-tests/companion-registration-demo-delete.http).
-   Both start with read-only proof and place every write after an explicit stop
-   checkpoint. The rename experiment must establish whether the exact provider
-   source ID survives a provider rename before updating companion labels. The
-   delete experiment must establish confirmed provider deletion, healthy
-   Registry Sync absence, and dependency review before retiring anything.
-   The companion creation demo's normal route is read-only; its separately
-   marked POST and DELETE requests must be skipped unless independently
-   approved. The correlation
-   experiment includes a separately approved write; it is not part of the
-   initial read-only path.
-   No Python, fixture, or hidden matching logic is
-   involved; every request and response is inspected by hand, one step at
-   a time.
+1. **Trial 1: HTTP experiments and demos** -
+   [`http-experiments.md`](http-experiments.md) is the entry
+   point. It separates four Registry Sync identity experiments, one additional
+   interaction-history experiment, and three companion lifecycle demos into
+   independent folders. The first experiment is read-only. Every later write
+   remains behind an explicit stop checkpoint. When the demos use the same
+   companion, run add, then rename, then delete; deletion is last because it
+   removes the object required by the rename demo. No Python, fixture, or
+   hidden matching logic is involved; every HTTP request and response is
+   inspected by hand, one step at a time.
 2. **Trial 2: notebook pilot** -
-   [`registry_sync_identity_walkthrough.ipynb`](trial-2-jupyter-notebook/registry_sync_identity_walkthrough.ipynb),
+   [`registry_sync_identity_walkthrough.ipynb`](notebook-pilot/registry_sync_identity_walkthrough.ipynb),
    an opt-in, explicitly-gated, offline-tested Python walkthrough of the
    full 16-step interim solution documented in
    [`identity-assignment-research.md`](identity-assignment-research.md#best-available-interim-solution-step-by-step),
@@ -78,21 +63,22 @@ Agent Identity, package, or agent registration.
 
 ## Local configuration
 
-Create `lab-20-registry-sync-identity-gaps/trial-1-http-tests/.env`:
+Create `lab-20-registry-sync-identity-gaps/.env`:
 
 ```dotenv
 A365_TENANT_ID=<directory-tenant-id>
 A365_CLIENT_ID=<A365-Registry-Experiment-client-id>
 A365_SAMPLE_PACKAGE_ID=
+A365_SAMPLE_SOURCE_AGENT_ID_PATH=
 ```
 
 The repository ignores `.env`. Never put real values into
-`trial-1-http-tests/index.http`,
+the tracked files under `experiments/` or `demos/`,
 tracked Markdown, chat, an issue, or a screenshot.
 
 The fresh-companion customer demo uses additional `A365_DEMO_*` values listed
 at the top of
-[`companion-registration-demo.http`](trial-1-http-tests/companion-registration-demo.http).
+[`demos/01-add-companion/demo.http`](demos/01-add-companion/demo.http).
 Keep them in the same ignored `.env`. For the already-created companion, run
 the file's read-only route and skip its Part 3B POST. The installed REST Client
 uses its cached `aadV2Token` helper: the normal route requests only read
@@ -103,25 +89,28 @@ localhost browser-callback login is required.
 
 ## Walkthrough
 
-Open [`trial-1-http-tests/index.http`](trial-1-http-tests/index.http) and run
-one request at a time:
+Open
+[`experiments/01-package-registration-lookup/experiment.http`](experiments/01-package-registration-lookup/experiment.http)
+and run one request at a time:
 
 1. Start device-code authentication.
 2. Complete sign-in in the browser.
 3. Exchange the device code for an access token.
 4. List packages and locally select one known GCP Registry Sync sample.
 5. Put that sample's package ID in the ignored `.env`.
-6. Get details for exactly that package ID.
-7. Stop and interpret the response before adding another API.
+6. Get details for exactly that package ID and copy the provider source ID into
+   the path-safe `.env` variable.
+7. Try the Package ID and provider source ID independently as Registration IDs.
+8. Stop and interpret the results before running a write experiment.
 
 After completing that supported inventory walkthrough, use
-[`registration-index.http`](trial-1-http-tests/registration-index.http) only
-for the separate,
+[`undocumented-collection-probe.http`](experiments/01-package-registration-lookup/undocumented-collection-probe.http)
+only for the separate,
 read-only negative probe of the undocumented registration collection endpoint.
 That probe requires delegated `AgentRegistration.Read.All`.
 
 The disposable correlation experiment is defined in
-[`registration-create-correlation.http`](trial-1-http-tests/registration-create-correlation.http).
+[`experiments/02-provider-source-registration-create/experiment.http`](experiments/02-provider-source-registration-create/experiment.http).
 It first creates a registration with the same provider-native `SourceAgentId`
 but no identity fields. Run the create request only once and stop immediately
 after recording its response.
@@ -173,7 +162,7 @@ complete:
 
 ## Notebook walkthrough (opt-in control-plane pilot)
 
-[`registry_sync_identity_walkthrough.ipynb`](trial-2-jupyter-notebook/registry_sync_identity_walkthrough.ipynb)
+[`registry_sync_identity_walkthrough.ipynb`](notebook-pilot/registry_sync_identity_walkthrough.ipynb)
 is a separate, **opt-in control-plane pilot** based on the interim solution in
 [`identity-assignment-research.md`](identity-assignment-research.md), with all
 logic in the notebook. There is no separate workflow class or Python module.
@@ -186,14 +175,14 @@ synchronized package and **not** a runtime-enforcement mechanism.
 ### Setup
 
 From the repository root, enter the lab and create the environment using
-[`pyproject.toml`](trial-2-jupyter-notebook/pyproject.toml) (Python >=3.12;
+[`pyproject.toml`](notebook-pilot/pyproject.toml) (Python >=3.12;
 `requests`, `msal`,
 `ipykernel`; test extras `nbformat`, `nbclient`). The project declares
 `[tool.uv] package = false`, so use `uv sync`, not an editable
 `pip install -e .` (there is no installable package to build):
 
 ```powershell
-cd lab-20-registry-sync-identity-gaps\trial-2-jupyter-notebook
+cd lab-20-registry-sync-identity-gaps\notebook-pilot
 
 uv sync --extra test --index-url https://packagefeedproxy.microsoft.io/pypi/simple/
 ```
@@ -326,7 +315,7 @@ the earlier flat single-group state can be imported without re-creation.
 
 Use an OS-protected local folder: `.gitignore` is not access control.
 The notebook saves returned IDs and relevant responses in
-`evidence\trial-2-jupyter-notebook\state.json`; ambiguous candidates, if any,
+`evidence\notebook-pilot\state.json`; ambiguous candidates, if any,
 are available in `candidates.json` in the same directory. Part 1 no longer
 creates `inventory-details.json`; any existing copy is historical evidence,
 not an input to this notebook. Tokens are kept only in
@@ -355,7 +344,7 @@ authorization check passed, that the identity fields caused the failure, or
 that the POST made no change.
 
 Use
-[`registration-identity-replay-template.http`](trial-2-jupyter-notebook/registration-identity-replay-template.http)
+[`registration-identity-replay-template.http`](notebook-pilot/registration-identity-replay-template.http)
 as an export template, not as a request to send directly. The current notebook
 helper retains the most recent unexpected HTTP response as `failed_response`
 in kernel memory. Immediately after the failed Part 3.2 request, run this
@@ -368,7 +357,7 @@ req = failed_response.request
 assert req.method == 'POST' and req.url == 'https://graph.microsoft.com/beta/copilot/agentRegistrations', 'Not the expected registration POST.'
 body = req.body.decode('utf-8') if isinstance(req.body, bytes) else req.body
 assert isinstance(body, str) and isinstance(json.loads(body), dict), 'Expected a JSON request body.'
-text = (LAB_ROOT / 'trial-2-jupyter-notebook' / 'registration-identity-replay-template.http').read_text(encoding='utf-8')
+text = (LAB_ROOT / 'notebook-pilot' / 'registration-identity-replay-template.http').read_text(encoding='utf-8')
 captured = {
     'capturedAuthorization': req.headers['Authorization'],
     'capturedContentType': req.headers['Content-Type'],
@@ -419,7 +408,7 @@ req = requests.Request(
     json=replay_body,
 ).prepare()
 body = req.body.decode('utf-8') if isinstance(req.body, bytes) else req.body
-text = (LAB_ROOT / 'trial-2-jupyter-notebook' / 'registration-identity-replay-template.http').read_text(encoding='utf-8')
+text = (LAB_ROOT / 'notebook-pilot' / 'registration-identity-replay-template.http').read_text(encoding='utf-8')
 captured = {
     'capturedAuthorization': req.headers['Authorization'],
     'capturedContentType': req.headers['Content-Type'],
@@ -443,7 +432,7 @@ that every header and value matches the earlier failed request. Record that
 difference as a new experiment condition.
 
 The generated file is
-`evidence\trial-2-jupyter-notebook\registration-create-replay.http`.
+`evidence\notebook-pilot\registration-create-replay.http`.
 It contains a live bearer token and real identifiers: keep it local, do not
 print its contents, and remove its bearer value or delete the file when the
 approved diagnostic sequence is finished. This is an
@@ -528,9 +517,10 @@ or token-delivery gap to fix by adding the permission again.
 ### Reuse the earlier successful HTTP authentication flow
 
 The ignored file
-`evidence\trial-2-jupyter-notebook\registration-create-current-agent-correlation.http`
+`evidence\notebook-pilot\registration-create-current-agent-correlation.http`
 is a private copy of
-`trial-1-http-tests\registration-create-correlation.http` configured for
+`experiments\02-provider-source-registration-create\experiment.http`
+configured for
 today's selected agent. It retains the earlier device-code delegated flow,
 the same `AgentRegistration.ReadWrite.All` scope request, and `/me` as creator
 and owner. It replaces the old package/source settings with the selected
@@ -609,8 +599,9 @@ The experiment owner explicitly approved deleting yesterday's retained,
 user-owned disposable registration and accepted that the operation cannot be
 undone. If the following recreate fails, there might be no replacement.
 
-In `trial-1-http-tests\registration-create-correlation.http`, run the prepared
-requests individually:
+In
+`experiments\02-provider-source-registration-create\experiment.http`,
+run the prepared requests individually:
 
 1. `getCreatedRegistrationAfterDescriptionUpdate`; save its latest body.
 2. `deleteCreatedRegistration`; require `204`.

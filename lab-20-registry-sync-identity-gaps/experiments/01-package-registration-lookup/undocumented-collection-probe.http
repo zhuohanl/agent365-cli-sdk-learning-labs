@@ -17,7 +17,7 @@
 # Required delegated permission:
 #   AgentRegistration.Read.All
 #
-# Keep tenant ID and client ID in the ignored .env used by index.http.
+# Keep tenant ID and client ID in the shared ignored ../../.env.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}

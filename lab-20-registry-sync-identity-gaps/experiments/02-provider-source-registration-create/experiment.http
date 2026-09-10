@@ -1,4 +1,4 @@
-# Lab 20: Disposable registration correlation experiment
+# Lab 20 Experiment 2: Provider-source Registration create
 #
 # Purpose:
 # Create one disposable agentRegistration with the same provider-native
@@ -15,19 +15,21 @@
 # - CopilotPackages.Read.All
 # - User.Read
 #
-# Add these local values to the ignored .env:
+# Add these local values to the shared ignored ../../.env:
 #
 # A365_CORRELATION_DISPLAY_NAME=<same disposable agent display name>
+# A365_CORRELATION_PACKAGE_ID=<original Registry Sync Package ID>
 # A365_CORRELATION_SOURCE_AGENT_ID=<nested SourceAgentId>
 # A365_CORRELATION_SOURCE_CREATED_AT=<nested CreatedDateTime>
 # A365_CORRELATION_SOURCE_MODIFIED_AT=<nested LastModifiedDateTime>
 #
-# Copy them only from ../evidence/trial-1-http-tests/disposable-before-create.json.
+# Copy them only from:
+# ../../evidence/experiments/02-provider-source-registration-create/disposable-before-create.json
 # Do not place real values in this tracked file.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
-@samplePackageId = {{$dotenv A365_SAMPLE_PACKAGE_ID}}
+@samplePackageId = {{$dotenv A365_CORRELATION_PACKAGE_ID}}
 @displayName = {{$dotenv A365_CORRELATION_DISPLAY_NAME}}
 @sourceAgentId = {{$dotenv A365_CORRELATION_SOURCE_AGENT_ID}}
 @sourceCreatedAt = {{$dotenv A365_CORRELATION_SOURCE_CREATED_AT}}
@@ -48,6 +50,15 @@
 @gcpProbe4SourceModifiedAt = {{$dotenv A365_GCP_PROBE_4_SOURCE_MODIFIED_AT}}
 @graphBaseUrl = https://graph.microsoft.com
 @experimentScopes = https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20offline_access
+
+# Historical result:
+# - one initial source-only create returned 201 and was readable;
+# - an exact-body recreate after deletion returned 500;
+# - additional selected GCP source-only creates returned the same backend
+#   permission-denial class.
+#
+# The result is therefore not a supported or reliably repeatable correlation
+# mechanism. Never retry an earlier source automatically.
 
 ###############################################################################
 # Step C3.1 - Start authentication
@@ -167,7 +178,7 @@ Accept: application/json
 #   description equals updatedDescription
 #
 # Save the response body only to:
-#   ../evidence/trial-1-http-tests/disposable-registration-after-description-update.json
+#   ../../evidence/experiments/02-provider-source-registration-create/disposable-registration-after-description-update.json
 
 # @name getCreatedRegistrationAfterDescriptionUpdate
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
@@ -183,7 +194,7 @@ Accept: application/json
 # propagation means permanent behavior.
 #
 # Save the response body only to:
-#   ../evidence/trial-1-http-tests/disposable-packages-after-create.json
+#   ../../evidence/experiments/02-provider-source-registration-create/disposable-packages-after-create.json
 
 # @name listPackagesAfterCreate
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
@@ -198,7 +209,7 @@ Accept: application/json
 # This request still uses the original Package ID, not the new Registration ID.
 #
 # Save the response body only to:
-#   ../evidence/trial-1-http-tests/disposable-package-detail-after-create.json
+#   ../../evidence/experiments/02-provider-source-registration-create/disposable-package-detail-after-create.json
 
 # @name getOriginalPackageAfterCreate
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{samplePackageId}}
@@ -215,7 +226,7 @@ Accept: application/json
 # also addresses Package Details for the API-created record.
 #
 # Save the response body only to:
-#   ../evidence/trial-1-http-tests/disposable-created-package-detail.json
+#   ../../evidence/experiments/02-provider-source-registration-create/disposable-created-package-detail.json
 
 # @name getCreatedPackageByRegistrationId
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{createdRegistrationId}}
@@ -346,7 +357,7 @@ Accept: application/json
 #   after propagation.
 #
 # Save the response body only to:
-#   ../evidence/trial-1-http-tests/disposable-packages-after-delete-recreate.json
+#   ../../evidence/experiments/02-provider-source-registration-create/disposable-packages-after-delete-recreate.json
 
 # @name listPackagesAfterDeleteRecreate
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
@@ -448,15 +459,16 @@ Accept: application/json
 ###
 
 # Run only after probe 3 returns 201.
-# @name getCreatedGcpProbe3Registration
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/projects%252f177291654093%252flocations%252fus-central1%252freasoningEngines%252f5049381256479899648
+# @name getCreatedGcpProbe3RegistrationBeforeDescriptionUpdate
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
 Accept: application/json
 
 
 ###
 
-PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/projects%252f177291654093%252flocations%252fus-central1%252freasoningEngines%252f5049381256479899648
+# @name updateCreatedGcpProbe3RegistrationDescription
+PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
@@ -468,7 +480,7 @@ Accept: application/json
 ###
 
 # Run only after probe 3 returns 201.
-# @name getCreatedGcpProbe3Registration
+# @name getCreatedGcpProbe3RegistrationAfterDescriptionUpdate
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
 Accept: application/json

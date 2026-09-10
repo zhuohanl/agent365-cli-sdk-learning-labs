@@ -26,7 +26,7 @@
 # - AgentRegistration.Read.All
 # - AgentRegistration.ReadWrite.All (needed only for Part 3B and Cleanup)
 #
-# Put all real values in this folder's ignored .env file:
+# Put all real values in the shared ignored ../../.env file:
 #
 # A365_TENANT_ID=<directory-tenant-id>
 # A365_CLIENT_ID=<public-client-application-id>
@@ -43,9 +43,16 @@
 # Preserve A365_DEMO_PROVIDER_SOURCE_AGENT_ID exactly as Registry Sync returned
 # it. Do not URL-decode and re-encode it.
 #
-# The companion source ID used by Part 3B is:
+# Save private responses only under:
+# ../../evidence/demos/01-add-companion/
 #
-# committed-fleet:companion:v1:gcp:<exact-provider-source-agent-id>
+# The companion source ID used by any future Part 3B creation is:
+#
+# agent-governance:companion:v1:gcp:<exact-provider-source-agent-id>
+#
+# The companion already created by the earlier experiment uses the legacy
+# committed-fleet:companion:v1 prefix. Preserve its exact mapped value. Do not
+# delete or recreate it solely to rename the namespace.
 #
 # Never commit .env, token responses, raw responses, screenshots containing
 # identifiers, or the durable mapping.
@@ -179,8 +186,11 @@ Accept: application/json
 # Expected: 200.
 # Confirm:
 # - id equals A365_DEMO_COMPANION_REGISTRATION_ID
-# - sourceAgentId starts with committed-fleet:companion:v1:gcp:
-# - everything after that prefix equals the exact provider source agent ID
+# - sourceAgentId equals the exact value in the durable mapping
+# - the existing experimental companion may retain the legacy
+#   committed-fleet:companion:v1:gcp: prefix
+# - everything after its versioned platform prefix equals the exact provider
+#   source agent ID
 # - originatingStore is GoogleVertexAI
 # - createdBy and ownerIds include the approved operator
 # - agentIdentityBlueprintId equals A365_DEMO_BLUEPRINT_APP_ID
@@ -215,7 +225,7 @@ OData-Version: 4.0
 #
 # sourceAgentId deliberately differs from the Registry Sync source ID:
 #
-# committed-fleet:companion:v1:gcp:{{providerSourceAgentId}}
+# agent-governance:companion:v1:gcp:{{providerSourceAgentId}}
 
 # @name demoCreateFreshCompanion
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -231,7 +241,7 @@ OData-Version: 4.0
   "ownerIds": [
     "{{demoCurrentUser.response.body.$.id}}"
   ],
-  "sourceAgentId": "committed-fleet:companion:v1:gcp:{{providerSourceAgentId}}",
+  "sourceAgentId": "agent-governance:companion:v1:gcp:{{providerSourceAgentId}}",
   "originatingStore": "GoogleVertexAI",
   "sourceCreatedDateTime": "{{sourceCreatedAt}}",
   "sourceLastModifiedDateTime": "{{sourceModifiedAt}}",
@@ -277,7 +287,8 @@ Accept: application/json
 # platform                     = GoogleVertexAI
 # providerSourceAgentId        = A365_DEMO_PROVIDER_SOURCE_AGENT_ID
 # packageId                    = A365_DEMO_ORIGINAL_PACKAGE_ID
-# companionSourceAgentId       = committed-fleet:companion:v1:gcp:<provider-source>
+# companionSourceAgentId       = exact saved mapping value
+# current new-value format     = agent-governance:companion:v1:gcp:<provider-source>
 # companionRegistrationId      = A365_DEMO_COMPANION_REGISTRATION_ID
 # blueprintId                  = A365_DEMO_BLUEPRINT_APP_ID
 # agentIdentityId              = A365_DEMO_AGENT_IDENTITY_ID

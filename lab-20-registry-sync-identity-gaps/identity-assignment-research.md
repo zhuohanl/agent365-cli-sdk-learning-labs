@@ -14,7 +14,7 @@ third-party runtime use it are three separate tasks.
 | Distinguish a complete connection list from package-derived connection context | [Connection list/details research](#programmatic-connection-list-and-details-renewed-review) |
 | Understand why the original record cannot yet be updated | [Path 2 research](#path-2-public-lookup-and-update-research) |
 | Follow the best available interim approach | [Detailed walkthrough](#best-available-interim-solution-step-by-step) |
-| Run the bounded steps end-to-end, offline-tested and read-only by default | [Notebook walkthrough](trial-2-jupyter-notebook/registry_sync_identity_walkthrough.ipynb) (see [`INSTRUCTION.md`](INSTRUCTION.md) for setup) |
+| Run the bounded steps end-to-end, offline-tested and read-only by default | [Notebook walkthrough](notebook-pilot/registry_sync_identity_walkthrough.ipynb) (see [`INSTRUCTION.md`](INSTRUCTION.md) for setup) |
 | Plan the demo and operating safeguards | [1-2 day delivery](#recommended-1-2-day-delivery) |
 | Prepare for future product support | [Migration](#prepare-for-native-support-without-assuming-its-migration-contract) |
 
@@ -100,7 +100,7 @@ short deadline does not remove this product boundary.
 | An Entra policy controls the original GCP runtime. | Not tested; neither creating objects nor filling metadata fields demonstrates this. |
 
 See [findings](findings.md), [experiment matrix](experiment-matrix.md), and the
-[correlation requests](trial-1-http-tests/registration-create-correlation.http).
+[provider-source creation experiment](experiments/02-provider-source-registration-create/experiment.http).
 The operator
 also reported that a registration GET using the synchronized Package ID
 failed. Treat that as an operator-reported observation: the recorded
@@ -498,7 +498,7 @@ files. The existing HTTP files cover the earlier experiment only. Use them
 for their existing requests; add any newly approved request to ignored
 local working material, and send it individually. Do not use "send all."
 
-[`registry_sync_identity_walkthrough.ipynb`](trial-2-jupyter-notebook/registry_sync_identity_walkthrough.ipynb)
+[`registry_sync_identity_walkthrough.ipynb`](notebook-pilot/registry_sync_identity_walkthrough.ipynb)
 implements the control-plane portion as a simple **three-part notebook** for
 Google Vertex AI's **Test V2**. This report retains its detailed 16-step
 reference; the notebook separates platform/group preparation from individual
@@ -1012,7 +1012,7 @@ each selected source agent must have exactly one approved group assignment.
    instead uses inline groups per platform, a sponsor ID, and separate
    approval flags for the group plan and its one selected agent's
    membership. It saves IDs under
-   `evidence\trial-2-jupyter-notebook\`; it does not implement this separate
+   `evidence\notebook-pilot\`; it does not implement this separate
    policy-file format or a general grouping engine.
 6. Resolve each selected source key against the approved membership list.
    Zero matches, multiple group matches, pending approval, or conflict

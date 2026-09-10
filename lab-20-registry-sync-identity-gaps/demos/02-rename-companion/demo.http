@@ -14,7 +14,7 @@
 # that the scoped provider source key is unchanged. A changed sourceAgentId is
 # not an in-place rename.
 #
-# Put all real values in this folder's ignored .env file:
+# Put all real values in the shared ignored ../../.env file:
 #
 # A365_TENANT_ID=<directory-tenant-id>
 # A365_CLIENT_ID=<public-client-application-id>
@@ -29,6 +29,9 @@
 #
 # Preserve the before and after sourceAgentId values byte-for-byte in ignored
 # evidence. Do not URL-decode, normalize, or put them in tracked files.
+#
+# Save private responses only under:
+# ../../evidence/demos/02-rename-companion/
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
@@ -110,8 +113,9 @@ Accept: application/json
 # Expected: 200.
 # Confirm:
 # - the ID is A365_DEMO_COMPANION_REGISTRATION_ID
-# - sourceAgentId equals
+# - sourceAgentId equals the legacy value created by the earlier experiment:
 #   committed-fleet:companion:v1:gcp:<exact-provider-source-id>
+# - do not replace that value solely to adopt the current namespace
 # - agentIdentityBlueprintId equals A365_DEMO_BLUEPRINT_APP_ID
 # - agentIdentityId equals A365_DEMO_AGENT_IDENTITY_ID
 
@@ -317,4 +321,3 @@ OData-Version: 4.0
 {
   "displayName": "{{oldTargetName}} - managed companion"
 }
-

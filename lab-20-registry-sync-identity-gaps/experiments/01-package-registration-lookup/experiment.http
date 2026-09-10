@@ -1,24 +1,26 @@
-# Lab 20: Registry Sync identity gaps
+# Lab 20 Experiment 1: Package and provider-source Registration lookup
 #
 # Run one request at a time with the VS Code REST Client extension.
-# Keep all real values in this lab's ignored .env file:
+# Keep all real values in the shared ignored ../../.env file:
 #
 # A365_TENANT_ID=<directory-tenant-id>
 # A365_CLIENT_ID=<A365-Registry-Experiment-client-id>
 # A365_SAMPLE_PACKAGE_ID=<leave-empty-until-step-4>
+# A365_SAMPLE_SOURCE_AGENT_ID_PATH=<provider-source-id-encoded-for-one-path-segment>
 #
 # Never commit .env, response files, access tokens, package IDs, agent names,
 # tenant IDs, client IDs, endpoints, or other identifiers.
 #
-# If Send Request appears to do nothing, first confirm that .env exists beside
-# this file and contains non-placeholder values for A365_TENANT_ID and
-# A365_CLIENT_ID. REST Client cannot send Step 1 until both resolve.
+# If Send Request appears to do nothing, confirm that .env exists in the
+# Lab 20 root and contains non-placeholder values for A365_TENANT_ID and
+# A365_CLIENT_ID.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
 @samplePackageId = {{$dotenv A365_SAMPLE_PACKAGE_ID}}
+@sampleSourceAgentIdPath = {{$dotenv A365_SAMPLE_SOURCE_AGENT_ID_PATH}}
 @graphBaseUrl = https://graph.microsoft.com
-@packageScope = https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20offline_access
+@experimentScopes = https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20offline_access
 
 ###############################################################################
 # Step 1 - Start delegated device-code authentication
@@ -47,7 +49,7 @@
 POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
 Content-Type: application/x-www-form-urlencoded
 
-client_id={{clientId}}&scope={{packageScope}}
+client_id={{clientId}}&scope={{experimentScopes}}
 
 ###
 
@@ -170,6 +172,13 @@ Accept: application/json
 # The documented package-detail example does not establish that identity or
 # Agent Registration fields are part of this resource. The live response is
 # the observation; absence must not be rewritten as "unsupported."
+#
+# SAVE REQUIRED:
+# ../../evidence/experiments/01-package-registration-lookup/package-details.json
+#
+# Copy the top-level Package ID to A365_SAMPLE_PACKAGE_ID. Copy the nested
+# provider SourceAgentId to A365_SAMPLE_SOURCE_AGENT_ID_PATH after encoding it
+# for one URL path segment.
 
 # @name getSelectedPackage
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{samplePackageId}}
@@ -177,6 +186,12 @@ Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
 Accept: application/json
 
 ###
+###############################################################################
+# Step 6.1 - Try the Package ID as a Registration ID
+#
+# SAVE REQUIRED: status and safe error class only. The documented Registration
+# GET expects a Registration ID, so this is a bounded negative probe.
+
 # @name getRegistrationUsingPackageIdNegativeProbe
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{samplePackageId}}
 Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
@@ -184,20 +199,42 @@ Accept: application/json
 
 
 ###
+###############################################################################
+# Step 6.2 - Try the provider source ID as a Registration ID
+#
+# Put the exact provider SourceAgentId into one URL path segment. If the
+# observed source already contains percent escapes, encode each percent sign
+# for the path, for example %2f becomes %252f.
+#
+# SAVE REQUIRED: status and safe error class only.
+
+# @name getRegistrationUsingProviderSourceIdNegativeProbe
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{sampleSourceAgentIdPath}}
+Authorization: ******
+Accept: application/json
+
+###
+
+###############################################################################
+# Optional inventory-only convenience query
+#
+# Do not use this filter as proof that every returned GoogleVertexAI Package
+# came from Registry Sync.
+
+# @name listGoogleVertexPackages
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages?$filter=platform eq 'GoogleVertexAI'
 Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
 Accept: application/json
 
 ###############################################################################
-# Stop after Step 5
+# Stop after Step 6
 #
-# Do not call Agent Registration, create a blueprint, create an Agent Identity,
-# or PATCH anything yet. Package IDs and Agent Registration IDs are documented
-# as identifiers for different resource types, and no supported mapping has
-# been established in this experiment.
+# Do not create a Blueprint, Agent Identity, or Registration, and do not PATCH
+# anything. Package IDs, provider source IDs, and Agent Registration IDs remain
+# different identifier classes.
 
 ###############################################################################
-# Step 6 - Documented identifier boundary (no request)
+# Step 7 - Documented identifier boundary (no request)
 #
 # Current first-party documentation exposes:
 #

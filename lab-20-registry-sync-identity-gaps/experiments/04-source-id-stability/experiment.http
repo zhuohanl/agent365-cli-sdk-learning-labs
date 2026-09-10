@@ -1,0 +1,1031 @@
+# Lab 20: Companion source ID stability experiment
+#
+# Question:
+# Should an agent-governance companion Registration identify its upstream agent
+# with the provider-native sourceAgentId or with the current Agent 365 Package
+# ID?
+#
+# This file compares two candidate values without creating a companion:
+#
+#   provider candidate =
+#     agent-governance:companion:v1:gcp:<exact-provider-source-agent-id>
+#
+#   package candidate =
+#     <current-copilot-package-id>
+#
+# The decisive observation is:
+#
+#   same exact provider sourceAgentId + different Package ID
+#
+# That result would show that the Package ID is an inventory pointer rather
+# than a stable source identity. If both values remain unchanged, record only
+# that both candidates survived the tested event. Do not generalize beyond it.
+#
+# Run one request at a time. Never use "Send All".
+#
+# Phase 0 is a no-change control.
+# Phase 1 renames the existing disposable GCP Agent Engine and renames it back.
+# Phase 2 rematerializes inventory by deleting and recreating the explicitly
+#         approved existing experimental Registry Sync connection.
+# Phase 3 deletes and recreates the disposable GCP Agent Engine.
+#
+# Phase 2 has no public Graph or Agent 365 CLI connection-management endpoint.
+# Its connection create, sync, and delete steps are therefore manual portal
+# checkpoints surrounded by read-only Graph observations.
+#
+# Phase 3 permanently changes the provider resource identity. Recreating the
+# same name and deployment does not restore the deleted GCP resource ID.
+#
+# Keep all real values and responses in ignored local evidence. Never commit:
+# - tenant, client, project, connection, Package, Registration, or agent IDs;
+# - GCP access tokens or Agent Studio configuration details;
+# - raw Graph or GCP responses; or
+# - screenshots containing identifiers.
+#
+# Required Microsoft Graph delegated permissions:
+# - User.Read
+# - CopilotPackages.Read.All
+#
+# Required GCP permissions for the optional provider writes:
+# - aiplatform.reasoningEngines.get
+# - the supported update permission for the rename PATCH
+# - aiplatform.reasoningEngines.delete
+# - the Agent Studio create/deploy access used by the original manual workflow
+#
+# Authentication sequence
+#
+# 1. Send stabilityStartDeviceCode first.
+#    This explicitly calls the tenant-specific Microsoft identity endpoint with
+#    A365_CLIENT_ID from the ignored .env. It does not use REST Client's
+#    built-in aadV2Token application.
+#
+# 2. Open verification_uri from the response, enter user_code, and sign in with
+#    the approved account. Do not share either code.
+#
+# 3. Send stabilityExchangeDeviceCode after browser sign-in completes. Keep the
+#    token response private. The Graph requests below use that named response.
+#
+# 4. Send stabilityCurrentUser, then complete the Phase 0 Graph reads before
+#    preparing any provider write. If the token expires, repeat steps 1-3.
+#
+# 5. Before the first GCP request, authenticate with the approved Google Cloud
+#    account in a separate terminal:
+#
+#      gcloud auth login
+#      gcloud auth print-access-token
+#
+#    The first command opens the interactive browser sign-in. Copy only the
+#    short-lived access token printed by the second command into the ignored
+#    .env value GCP_STABILITY_ACCESS_TOKEN.
+#
+# 6. Refresh GCP_STABILITY_ACCESS_TOKEN before any later GCP request if the
+#    previous token has expired. Never put the token directly in this file.
+#
+# 7. After the experiment, remove GCP_STABILITY_ACCESS_TOKEN from .env, clear
+#    REST Client request history, and sign out or revoke the temporary Google
+#    authentication context when required by the approved environment.
+#
+# Put these values in the shared ignored ../../.env:
+#
+# A365_TENANT_ID=<directory-tenant-id>
+# A365_CLIENT_ID=<public-client-application-id>
+# A365_STABILITY_ORIGINAL_PACKAGE_ID=<copy the disposable agent's top-level
+#   Package id
+#   from stabilityBaselineList1 before sending stabilityBaselinePackage1>
+# A365_STABILITY_PROVIDER_SOURCE_AGENT_ID=<copy the exact nested SourceAgentId
+#   from stabilityBaselinePackage1 after setting the Package ID>
+# A365_STABILITY_AFTER_RENAME_PACKAGE_ID=<package-id-after-rename>
+# A365_STABILITY_AFTER_RENAME_BACK_PACKAGE_ID=<package-id-after-rename-back>
+# A365_STABILITY_PHASE2_PACKAGE_ID=<same-source-package-id-seen-via-phase-2>
+# A365_STABILITY_REPLACEMENT_PACKAGE_ID=<package-id-after-provider-recreate>
+# A365_STABILITY_REPLACEMENT_SOURCE_AGENT_ID=<exact-source-id-after-recreate>
+# GCP_STABILITY_PROJECT_ID=<disposable-gcp-project-id>
+# GCP_STABILITY_LOCATION=<agent-engine-location>
+# GCP_STABILITY_REASONING_ENGINE_ID=<original-reasoning-engine-id>
+# GCP_STABILITY_REPLACEMENT_REASONING_ENGINE_ID=<new-id-after-recreate>
+# GCP_STABILITY_ORIGINAL_DISPLAY_NAME=lab-source-id-stability-disposable
+# GCP_STABILITY_RENAMED_DISPLAY_NAME=lab-source-id-stability-renamed
+# GCP_STABILITY_ACCESS_TOKEN=<short-lived-google-oauth-access-token>
+#
+# Refresh GCP_STABILITY_ACCESS_TOKEN immediately before a GCP request. Remove
+# it from .env and clear REST Client request history after the experiment.
+#
+# Before Phase 3 deletion, complete the ignored portal recreation checklist:
+#
+# lab-20-registry-sync-identity-gaps/evidence/experiments/04-source-id-stability/
+#   phase-3-portal-recreation-checklist.txt
+#
+# The replacement must be created through the same Google Cloud portal Agent
+# Studio workflow used for the original disposable agent. This file does not
+# invent a REST create body for a portal-created agent.
+#
+# Evidence-save convention
+#
+# Every step marked SAVE REQUIRED must be saved under:
+#
+#   lab-20-registry-sync-identity-gaps/evidence/source-id-stability/
+#
+# Use the suggested synthetic filename. Save complete response bodies for JSON
+# responses. Graph and GCP error bodies are also JSON, so save the safe response
+# body with a .json extension and record the HTTP status separately in the
+# comparison/checkpoint. Never save an access token, refresh token, device code,
+# or user code as experiment evidence.
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@originalPackageId = {{$dotenv A365_STABILITY_ORIGINAL_PACKAGE_ID}}
+@baselineProviderSourceId = {{$dotenv A365_STABILITY_PROVIDER_SOURCE_AGENT_ID}}
+@afterRenamePackageId = {{$dotenv A365_STABILITY_AFTER_RENAME_PACKAGE_ID}}
+@afterRenameBackPackageId = {{$dotenv A365_STABILITY_AFTER_RENAME_BACK_PACKAGE_ID}}
+@phase2PackageId = {{$dotenv A365_STABILITY_PHASE2_PACKAGE_ID}}
+@replacementPackageId = {{$dotenv A365_STABILITY_REPLACEMENT_PACKAGE_ID}}
+@replacementProviderSourceId = {{$dotenv A365_STABILITY_REPLACEMENT_SOURCE_AGENT_ID}}
+@gcpProjectId = {{$dotenv GCP_STABILITY_PROJECT_ID}}
+@gcpLocation = {{$dotenv GCP_STABILITY_LOCATION}}
+@gcpReasoningEngineId = {{$dotenv GCP_STABILITY_REASONING_ENGINE_ID}}
+@gcpReplacementReasoningEngineId = {{$dotenv GCP_STABILITY_REPLACEMENT_REASONING_ENGINE_ID}}
+@gcpOriginalDisplayName = {{$dotenv GCP_STABILITY_ORIGINAL_DISPLAY_NAME}}
+@gcpRenamedDisplayName = {{$dotenv GCP_STABILITY_RENAMED_DISPLAY_NAME}}
+@gcpAccessToken = {{$dotenv GCP_STABILITY_ACCESS_TOKEN}}
+@graphBaseUrl = https://graph.microsoft.com
+@gcpBaseUrl = https://{{gcpLocation}}-aiplatform.googleapis.com
+@graphReadScope = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20offline_access
+
+###############################################################################
+# Sign-in 1 - start delegated device-code authentication
+#
+# Expected: 200 with user_code, device_code, verification_uri, expiry, and
+# polling interval. This request uses the tenant and public-client application
+# from the ignored .env rather than REST Client's built-in application.
+#
+# DO NOT SAVE: the response contains short-lived authentication codes.
+
+# @name stabilityStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{graphReadScope}}
+
+###
+
+###############################################################################
+# Sign-in 2 - complete browser sign-in
+#
+# Open verification_uri from stabilityStartDeviceCode, enter user_code, and
+# sign in as the approved operator. Return here only after the browser confirms
+# success.
+
+###############################################################################
+# Sign-in 3 - exchange the device code for a Graph token
+#
+# Expected: 200. If the browser step is incomplete, the response can contain
+# authorization_pending. Wait for the returned interval and retry this request.
+# Never save, share, or commit this response.
+#
+# DO NOT SAVE: the response contains access and refresh tokens.
+
+# @name stabilityExchangeDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{stabilityStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Phase 0 - No-change control
+#
+# Goal:
+# Establish whether repeated healthy Registry Sync runs preserve both the
+# provider source ID and Package ID before any provider mutation.
+
+###############################################################################
+# Sign-in verification - send after the token exchange
+#
+# Expected: 200. Keep the returned user ID private.
+#
+# DO NOT SAVE: this request is only an authentication check.
+
+# @name stabilityCurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Bootstrap checkpoint - populate the baseline IDs
+#
+# A365_STABILITY_ORIGINAL_PACKAGE_ID is not generated automatically and must
+# not be guessed or copied from an unrelated sample.
+#
+# 1. Send stabilityBaselineList1 without sending the Package Details request.
+# 2. Locate the approved lab-source-id-stability-disposable Registry Sync
+#    record using its display name, GoogleVertexAI platform, provider scope,
+#    and Connected Platform metadata.
+# 3. Copy that record's top-level id into the ignored .env:
+#
+#      A365_STABILITY_ORIGINAL_PACKAGE_ID=<disposable-agent-package-id>
+#
+# 4. Send stabilityBaselinePackage1.
+# 5. Parse its nested definition and copy SourceAgentId byte-for-byte into:
+#
+#      A365_STABILITY_PROVIDER_SOURCE_AGENT_ID=<exact-nested-source-id>
+#
+# Save .env before continuing. Do not use A365_SAMPLE_PACKAGE_ID unless a fresh
+# comparison proves it is this disposable agent's Package.
+#
+# SAVE REQUIRED: stabilityBaselineList1 response body as
+# phase-0-baseline-list-1.json.
+
+# @name stabilityBaselineList1
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Before sending this request
+#
+# From stabilityBaselineList1, identify the approved
+# lab-source-id-stability-disposable Registry Sync Package and add its top-level
+# id to the ignored .env:
+#
+#   A365_STABILITY_ORIGINAL_PACKAGE_ID=<disposable-agent-package-id>
+#
+# Save .env before continuing. Do not use a display name or
+# A365_SAMPLE_PACKAGE_ID as a substitute.
+#
+# SAVE REQUIRED: stabilityBaselinePackage1 response body as
+# phase-0-baseline-package-1.json.
+
+# @name stabilityBaselinePackage1
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Save the Phase 0 baseline response
+#
+# From the response's nested definition, copy SourceAgentId byte-for-byte into
+# the ignored .env:
+#
+#   A365_STABILITY_PROVIDER_SOURCE_AGENT_ID=<exact-nested-source-id>
+#
+# Also preserve the observation timestamp and confirm that the response's
+# top-level id equals A365_STABILITY_ORIGINAL_PACKAGE_ID. Do not copy the raw
+# response or either identifier into tracked Markdown.
+
+###############################################################################
+# Manual checkpoint 0A - trigger a no-change Registry Sync
+#
+# In Connected platforms, trigger a sync for the existing approved connection
+# without changing the provider agent, connection, or credentials.
+# Wait for a successful sync and the agreed propagation period.
+#
+# SAVE REQUIRED: the successful sync status and completion time as
+# phase-0-no-change-sync.txt or an ignored screenshot.
+
+# SAVE REQUIRED: stabilityBaselineList2 response body as
+# phase-0-baseline-list-2.json.
+
+# @name stabilityBaselineList2
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: stabilityBaselinePackage2 response body as
+# phase-0-baseline-package-2.json.
+
+# @name stabilityBaselinePackage2
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Checkpoint 0B - compare the two baseline snapshots
+#
+# Require:
+# - the exact nested sourceAgentId is byte-for-byte equal to
+#   A365_STABILITY_PROVIDER_SOURCE_AGENT_ID;
+# - the provider project and location are unchanged;
+# - the selected Package ID remains A365_STABILITY_ORIGINAL_PACKAGE_ID; and
+# - only one Registry Sync Package matches the scoped provider source key.
+#
+# If Package identity already changes during a no-change sync, stop. That is
+# immediately discriminating evidence against Package ID as a stable key.
+
+###############################################################################
+# Phase 1 - Rename and rename back
+#
+# Only displayName changes. The GCP resource ID, project, location, deployment,
+# permissions and connection must remain fixed.
+#
+# SAVE REQUIRED: stabilityGetGcpBeforeRename response body as
+# phase-1-gcp-before-rename.json.
+#
+# Before sending the first GCP request
+#
+# 1. In a separate terminal, authenticate with the approved Google account:
+#
+#      gcloud auth login
+#
+#    If the correct account is already authenticated, do not repeat login
+#    unnecessarily.
+#
+# 2. Generate a fresh short-lived access token:
+#
+#      gcloud auth print-access-token
+#
+# 3. Copy the printed token into the ignored .env:
+#
+#      GCP_STABILITY_ACCESS_TOKEN=<short-lived-token>
+#
+# 4. Confirm these ignored .env values are also populated for the disposable
+#    Agent Engine:
+#
+#      GCP_STABILITY_PROJECT_ID
+#      GCP_STABILITY_LOCATION
+#      GCP_STABILITY_REASONING_ENGINE_ID
+#      GCP_STABILITY_ORIGINAL_DISPLAY_NAME
+#      GCP_STABILITY_RENAMED_DISPLAY_NAME
+#
+# Save .env before sending stabilityGetGcpBeforeRename. Never save the token as
+# experiment evidence or place it directly in this tracked file.
+
+# @name stabilityGetGcpBeforeRename
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 1A - approve one provider display-name PATCH
+#
+# Confirm that this is lab-source-id-stability-disposable. Record its full
+# resource name and current displayName privately before sending the PATCH.
+#
+# SAVE REQUIRED: stabilityRenameGcpAgent operation response as
+# phase-1-gcp-rename-operation.json.
+
+# @name stabilityRenameGcpAgent
+PATCH {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}?updateMask=displayName
+Authorization: Bearer {{gcpAccessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}",
+  "displayName": "{{gcpRenamedDisplayName}}"
+}
+
+###
+
+###############################################################################
+# Phase 1 rename operation - poll until complete
+#
+# A 200 response from stabilityRenameGcpAgent means the long-running operation
+# was accepted. It does not mean the display name has already changed.
+#
+# Send this request until the response contains:
+#
+#   "done": true
+#
+# If the completed operation contains error, stop and preserve the safe error
+# class. Do not continue to Registry Sync. If done is absent or false, wait
+# before polling again.
+#
+# SAVE REQUIRED: the final completed stabilityGetRenameOperation response as
+# phase-1-gcp-rename-operation-final.json. Intermediate pending polls do not
+# need to be saved.
+
+# @name stabilityGetRenameOperation
+GET {{gcpBaseUrl}}/v1/{{stabilityRenameGcpAgent.response.body.$.name}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: stabilityGetGcpAfterRename response body as
+# phase-1-gcp-after-rename.json.
+#
+# Send only after stabilityGetRenameOperation reports done=true with no error.
+# Treat this GET as authoritative for the provider displayName. The GCP portal
+# can update later because of browser caching or UI propagation.
+
+# @name stabilityGetGcpAfterRename
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Manual checkpoint 1B - sync the renamed provider agent
+#
+# Wait for the GCP long-running update operation to complete, verify the same
+# full resource name with the new displayName, then trigger Registry Sync.
+# After a successful sync and propagation period, list every Package page.
+#
+# SAVE REQUIRED: the successful sync status and completion time as
+# phase-1-rename-sync.txt or an ignored screenshot.
+#
+# SAVE REQUIRED: stabilityRenameList response body as
+# phase-1-package-list-after-rename.json.
+
+# @name stabilityRenameList
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# Set A365_STABILITY_AFTER_RENAME_PACKAGE_ID from the Package matched by exact
+# provider scope and sourceAgentId, not by display name.
+#
+# SAVE REQUIRED: stabilityRenamePackage response body as
+# phase-1-package-after-rename.json.
+
+# @name stabilityRenamePackage
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{afterRenamePackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Checkpoint 1C - classify rename
+#
+# Compare baseline and renamed snapshots:
+#
+# 1. Same sourceAgentId, same Package ID:
+#    both candidates survived this rename; the result does not choose one.
+#
+# 2. Same sourceAgentId, different Package ID:
+#    provider candidate is stable and Package candidate is not.
+#
+# 3. Different sourceAgentId:
+#    stop for source-identity investigation, regardless of Package ID.
+#
+# 4. Old and new Packages coexist:
+#    stop for duplication reconciliation.
+#
+# Do not create a companion to test either candidate.
+
+###############################################################################
+# Stop 1D - approve rename-back cleanup
+#
+# SAVE REQUIRED: stabilityRenameBackGcpAgent operation response as
+# phase-1-gcp-rename-back-operation.json.
+
+# @name stabilityRenameBackGcpAgent
+PATCH {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}?updateMask=displayName
+Authorization: Bearer {{gcpAccessToken}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}",
+  "displayName": "{{gcpOriginalDisplayName}}"
+}
+
+###
+
+# SAVE REQUIRED: the final completed stabilityGetRenameBackOperation response
+# as phase-1-gcp-rename-back-operation-final.json. Intermediate pending polls
+# do not need to be saved.
+
+# @name stabilityGetRenameBackOperation
+GET {{gcpBaseUrl}}/v1/{{stabilityRenameBackGcpAgent.response.body.$.name}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: stabilityGetGcpAfterRenameBack response body as
+# phase-1-gcp-after-rename-back.json.
+#
+# Send only after stabilityGetRenameBackOperation reports done=true with no
+# error.
+
+# @name stabilityGetGcpAfterRenameBack
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Manual checkpoint 1E - sync after rename-back
+#
+# Wait for the provider operation, verify the original displayName on the same
+# GCP resource name, trigger Registry Sync, and wait for success.
+#
+# SAVE REQUIRED: the successful sync status and completion time as
+# phase-1-rename-back-sync.txt or an ignored screenshot.
+#
+# SAVE REQUIRED: stabilityRenameBackList response body as
+# phase-1-package-list-after-rename-back.json.
+
+# @name stabilityRenameBackList
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Before sending stabilityRenameBackPackage
+#
+# From stabilityRenameBackList, locate the disposable agent using:
+# - displayName equal to GCP_STABILITY_ORIGINAL_DISPLAY_NAME;
+# - platform equal to GoogleVertexAI; and
+# - the same provider scope and exact nested SourceAgentId established in
+#   Phase 0.
+#
+# Copy its current top-level Package id into the ignored .env even when it is
+# equal to the original Package ID:
+#
+#   A365_STABILITY_AFTER_RENAME_BACK_PACKAGE_ID=<current-package-id>
+#
+# Save .env before continuing. If the old and renamed records coexist, or the
+# exact source cannot be matched unambiguously, stop instead of selecting by
+# display name alone.
+#
+# SAVE REQUIRED: stabilityRenameBackPackage response body as
+# phase-1-package-after-rename-back.json.
+
+# @name stabilityRenameBackPackage
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{afterRenameBackPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Phase 2 - Registry Sync rematerialization
+#
+# This is the discriminating same-provider-resource test. Do not modify the GCP
+# Agent Engine. The provider source ID must remain exactly equal to the Phase 0
+# value.
+#
+# The portal rejected a second connection for the same Project ID. The approved
+# alternative is to delete and recreate the existing experimental connection
+# while leaving the provider agent unchanged.
+#
+# There is no reviewed public Graph or Agent 365 CLI operation for creating,
+# triggering, or deleting a Connected platforms connection.
+
+###############################################################################
+# Stop 2A - capture everything required to recreate the connection
+#
+# Complete the ignored checklist before deleting anything:
+#
+#   evidence/experiments/04-source-id-stability/
+#     phase-2-connection-recreation-checklist.txt
+#
+# Capture privately from Connected platforms:
+# - connection display name and description;
+# - provider, Project ID, and every configured region;
+# - automatic-import selection and other connection options;
+# - current connection ID, last successful sync, and sync result;
+# - the credential source and a confirmed way to supply it again; and
+# - any permission or validation requirements.
+#
+# The experiment owner has confirmed that this Registry Sync connection remains
+# experimental and has no downstream consumer. If that changes, stop.
+#
+# SAVE REQUIRED: connection configuration and current healthy status as
+# phase-2-connection-before-delete.txt or ignored screenshots.
+#
+# SAVE REQUIRED: stabilityPhase2ListBeforeConnectionDelete response body as
+# phase-2-package-list-before-connection-delete.json.
+
+# @name stabilityPhase2ListBeforeConnectionDelete
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: stabilityPhase2PackageBeforeConnectionDelete response body as
+# phase-2-package-before-connection-delete.json.
+
+# @name stabilityPhase2PackageBeforeConnectionDelete
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 2B - approve deletion of the existing experimental connection
+#
+# Delete only the captured Google Vertex AI connection through Connected
+# platforms. Do not delete the GCP Agent Engine, revoke the credential, or
+# modify the project or region.
+#
+# SAVE REQUIRED: portal deletion confirmation and time as
+# phase-2-connection-delete.txt or an ignored screenshot.
+#
+# Wait for the documented propagation period before interpreting inventory.
+#
+# SAVE REQUIRED: stabilityPhase2ListAfterConnectionDelete response body as
+# phase-2-package-list-after-connection-delete.json.
+
+# @name stabilityPhase2ListAfterConnectionDelete
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: stabilityPhase2OldPackageAfterConnectionDelete success or
+# error response body as phase-2-old-package-after-connection-delete.json.
+# Record the HTTP status separately in the Phase 2 comparison.
+
+# @name stabilityPhase2OldPackageAfterConnectionDelete
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Checkpoint 2C - confirm the connection deletion boundary
+#
+# The GCP agent must still exist unchanged. Package inventory can disappear
+# immediately or after propagation. Record the observed timing; do not treat a
+# temporarily retained Package as proof that the connection still exists.
+#
+# Before recreating the connection, confirm in GCP that the same reasoning
+# engine resource still exists with the same resource name.
+#
+# GCP token refresh checkpoint
+#
+# If this request returns 401 or reports an expired token, authenticate again
+# with the approved Google Cloud account in a separate terminal:
+#
+#   gcloud auth login
+#   gcloud auth print-access-token
+#
+# Skip gcloud auth login when the correct account is already active. Copy only
+# the new short-lived access token printed by gcloud auth print-access-token
+# into the ignored .env:
+#
+#   GCP_STABILITY_ACCESS_TOKEN=<new-short-lived-token>
+#
+# Save .env, then resend only this GET. Never save the token as evidence.
+#
+# SAVE REQUIRED: stabilityPhase2GetGcpBeforeConnectionRecreate response body as
+# phase-2-gcp-before-connection-recreate.json.
+
+# @name stabilityPhase2GetGcpBeforeConnectionRecreate
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 2D - recreate the same Registry Sync connection
+#
+# In Connected platforms, recreate the connection using the saved:
+# - display name and description;
+# - Google Vertex AI provider;
+# - exact Project ID and region selection;
+# - import option and other settings; and
+# - approved credential source.
+#
+# Validate credentials, save the connection, trigger a sync, and wait for a
+# successful result plus the propagation period.
+#
+# SAVE REQUIRED: recreated connection configuration, new connection ID, and
+# successful sync result as phase-2-connection-after-recreate.txt or ignored
+# screenshots.
+#
+# SAVE REQUIRED: stabilityPhase2ListAfterConnectionRecreate response body as
+# phase-2-package-list-after-connection-recreate.json.
+
+# @name stabilityPhase2ListAfterConnectionRecreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Before sending stabilityPhase2PackageAfterConnectionRecreate
+#
+# Locate lab-source-id-stability-disposable using the exact Phase 0 provider
+# SourceAgentId, Project ID, region, and GoogleVertexAI platform. Do not select
+# by display name alone.
+#
+# Copy its current top-level Package ID into the ignored .env:
+#
+#   A365_STABILITY_PHASE2_PACKAGE_ID=<package-id-after-connection-recreate>
+#
+# Save .env before continuing. If the source cannot be matched unambiguously,
+# stop and record reconciliation-required.
+#
+# SAVE REQUIRED: stabilityPhase2PackageAfterConnectionRecreate response body
+# as phase-2-package-after-connection-recreate.json.
+
+# @name stabilityPhase2PackageAfterConnectionRecreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{phase2PackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Checkpoint 2E - classify connection rematerialization
+#
+# Compare the exact provider source IDs, connection IDs, and Package IDs before
+# connection deletion and after connection recreation:
+#
+# 1. Same sourceAgentId, original Package reused:
+#    Package ID survived this connection recreation in the tested environment.
+#
+# 2. Same sourceAgentId, new Package ID:
+#    Package identity depends on the import/connection representation. This is
+#    direct evidence against using Package ID as the companion source identity.
+#
+# 3. Different sourceAgentId:
+#    stop; the recreated connection did not expose an equivalent source key.
+#
+# Do not create a companion for either Package representation.
+# The recreated connection is the restored final state. Do not delete it as
+# cleanup. Confirm that future sync remains healthy and that no duplicate
+# Package representation remains.
+
+###############################################################################
+# Phase 3 - Delete and recreate the provider agent
+#
+# This phase answers whether a replacement with the same display name receives
+# a new provider source ID and Package ID. It does not test rename stability.
+#
+# The original GCP resource identity cannot be restored after deletion.
+#
+# Refresh GCP_STABILITY_ACCESS_TOKEN with gcloud auth print-access-token before
+# this request if the Phase 2 token has expired. Use gcloud auth login first
+# only when the approved account is no longer active.
+#
+# SAVE REQUIRED: stabilityGetGcpBeforeDelete response body as
+# phase-3-gcp-before-delete.json.
+
+# @name stabilityGetGcpBeforeDelete
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3A - irreversible provider deletion approval
+#
+# Continue only if:
+# - the target is the approved lab-source-id-stability-disposable Agent Engine;
+# - phase-3-portal-recreation-checklist.txt is complete;
+# - the Agent Studio instructions, model/runtime choices, tools, dependencies,
+#   region, and other required settings are captured privately;
+# - child resources and runtime dependencies have been reviewed;
+# - the Phase 2 connection has been recreated and its sync is healthy;
+# - permanent loss of the original GCP resource ID is accepted; and
+# - no production object depends on it.
+#
+# The default force=false prevents deletion when undeleted children block it.
+# Do not change to force=true merely to bypass FAILED_PRECONDITION.
+#
+# SAVE REQUIRED: stabilityDeleteGcpAgent operation response as
+# phase-3-gcp-delete-operation.json.
+
+# @name stabilityDeleteGcpAgent
+DELETE {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}?force=false
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Manual checkpoint 3B - wait for the delete operation
+#
+# Do not infer deletion from the initial operation response alone.
+#
+# SAVE REQUIRED: the final completed stabilityGetDeleteOperation response as
+# phase-3-gcp-delete-operation-final.json. Intermediate pending polls do not
+# need to be saved.
+
+# @name stabilityGetDeleteOperation
+GET {{gcpBaseUrl}}/v1/{{stabilityDeleteGcpAgent.response.body.$.name}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+# Continue only after stabilityGetDeleteOperation reports done=true with no
+# error.
+#
+# SAVE REQUIRED: stabilityGetDeletedGcpAgent error response body as
+# phase-3-gcp-after-delete.json. Record the HTTP status separately.
+
+# @name stabilityGetDeletedGcpAgent
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Manual checkpoint 3C - sync confirmed provider absence
+#
+# After the provider GET confirms absence, trigger Registry Sync and wait for a
+# successful cycle plus the agreed grace period. Package disappearance remains
+# an observation; this experiment has no companion to retire.
+#
+# SAVE REQUIRED: the successful sync status and completion time as
+# phase-3-source-deletion-sync.txt or an ignored screenshot.
+#
+# SAVE REQUIRED: stabilityPhase3ListAfterDelete response body as
+# phase-3-package-list-after-source-delete.json.
+
+# @name stabilityPhase3ListAfterDelete
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# A 200 means the old inventory record still exists. A 404 after confirmed
+# healthy sync is evidence of removal.
+#
+# SAVE REQUIRED: stabilityGetOriginalPackageAfterDelete success or error
+# response body as phase-3-original-package-after-delete.json. Record the HTTP
+# status separately.
+
+# @name stabilityGetOriginalPackageAfterDelete
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3D - manually create the replacement in Agent Studio
+#
+# Recreate the disposable agent through Google Cloud portal -> Agent Studio,
+# using the completed private checklist and the original display name:
+#
+#   lab-source-id-stability-disposable
+#
+# Do not attempt to reuse the deleted reasoning engine ID. Wait until the new
+# agent is fully created and deployed, then copy only its new reasoning engine
+# ID into:
+#
+#   GCP_STABILITY_REPLACEMENT_REASONING_ENGINE_ID=<new-engine-id>
+#
+# Do not overwrite GCP_STABILITY_REASONING_ENGINE_ID. Save .env before
+# continuing.
+#
+# SAVE REQUIRED: the Agent Studio creation/deployment confirmation and the
+# completion time as phase-3-gcp-replacement-portal.txt or an ignored
+# screenshot. Keep configuration details and identifiers private.
+#
+# Manual checkpoint 3E - capture the replacement resource
+#
+# The Agent Studio creation can outlast the current GCP token. Refresh
+# GCP_STABILITY_ACCESS_TOKEN with gcloud auth print-access-token before this
+# GET, using gcloud auth login first only if the approved account is no longer
+# active.
+#
+# SAVE REQUIRED: stabilityGetReplacementGcpAgent response body as
+# phase-3-gcp-replacement.json.
+
+# @name stabilityGetReplacementGcpAgent
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReplacementReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Manual checkpoint 3F - sync the replacement
+#
+# Trigger Registry Sync after the replacement is healthy. Read every inventory
+# page and match by the new exact provider resource identity, not display name.
+# Save the observed IDs in:
+#
+# A365_STABILITY_REPLACEMENT_SOURCE_AGENT_ID
+# A365_STABILITY_REPLACEMENT_PACKAGE_ID
+#
+# SAVE REQUIRED: the successful sync status and completion time as
+# phase-3-replacement-sync.txt or an ignored screenshot.
+#
+# SAVE REQUIRED: stabilityPhase3ListAfterCreate response body as
+# phase-3-package-list-after-replacement.json.
+
+# @name stabilityPhase3ListAfterCreate
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: stabilityGetReplacementPackage response body as
+# phase-3-replacement-package.json.
+
+# @name stabilityGetReplacementPackage
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{replacementPackageId}}
+Authorization: Bearer {{stabilityExchangeDeviceCode.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Checkpoint 3G - classify replacement
+#
+# Expected provider behavior:
+#
+#   baselineProviderSourceId != replacementProviderSourceId
+#
+# Compare:
+# - old and new full GCP resource names;
+# - old and new exact nested Registry Sync sourceAgentId values;
+# - old and new Package IDs.
+#
+# If both source ID and Package ID change, both candidate keys correctly treat
+# the replacement as a new source. This result does not distinguish the two
+# candidate schemes.
+#
+# Do not create a companion for either source during this experiment. Record
+# the old source as deleted and the replacement as a new provider identity.
+
+###############################################################################
+# Optional cleanup 3H - delete the replacement resource
+#
+# Run only if the approved final state is to leave no replacement Agent Engine.
+# This does not restore the original resource. If the replacement should remain
+# as the new disposable test agent, do not send this request.
+#
+# Refresh GCP_STABILITY_ACCESS_TOKEN with gcloud auth print-access-token before
+# optional cleanup if the current token has expired.
+#
+# SAVE REQUIRED if sent: stabilityDeleteReplacementGcpAgent operation response
+# as phase-3-replacement-cleanup-operation.json.
+
+# @name stabilityDeleteReplacementGcpAgent
+DELETE {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReplacementReasoningEngineId}}?force=false
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED if sent: the final completed
+# stabilityGetDeleteReplacementOperation response as
+# phase-3-replacement-cleanup-operation-final.json. Intermediate pending polls
+# do not need to be saved.
+
+# @name stabilityGetDeleteReplacementOperation
+GET {{gcpBaseUrl}}/v1/{{stabilityDeleteReplacementGcpAgent.response.body.$.name}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED if sent: stabilityGetDeletedReplacementGcpAgent error response
+# body as phase-3-replacement-cleanup-verification.json. Record the HTTP status
+# separately.
+
+# @name stabilityGetDeletedReplacementGcpAgent
+GET {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}/locations/{{gcpLocation}}/reasoningEngines/{{gcpReplacementReasoningEngineId}}
+Authorization: Bearer {{gcpAccessToken}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Final evidence checkpoint
+#
+# Record only safe comparisons in tracked experiment results:
+#
+# | Event | provider source ID equal | Package ID equal | Package count |
+# | No-change sync | true/false | true/false | number |
+# | Rename | true/false | true/false | number |
+# | Rename back | true/false | true/false | number |
+# | Connection recreation | true/false | true/false | number |
+# | Delete/recreate | true/false | true/false | number |
+#
+# Keep raw values and responses ignored. Record unsupported, unavailable,
+# permission-denied, inconclusive, and supported outcomes separately.
+#
+# Remove the GCP token and private create body after the experiment, revoke
+# disposable credentials, clear REST Client history, and retain the protected
+# mapping/tombstone evidence required for lifecycle reconciliation.

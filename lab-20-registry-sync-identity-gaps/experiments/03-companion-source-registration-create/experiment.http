@@ -1,0 +1,175 @@
+# Lab 20 Experiment 3: Create a Registration with a companion source ID
+#
+# Question:
+# Can one separately managed Agent Registration be created with:
+# - a deterministic companion source ID distinct from the provider source ID;
+# - an existing Blueprint app ID; and
+# - an existing Agent Identity ID;
+# while the original Registry Sync Package remains unchanged?
+#
+# The earlier GCP experiment returned 201 and successful readback. This file
+# reconstructs that controlled request for a different explicitly approved
+# disposable source. Do not resend it for the source that already has a
+# companion or an unresolved create.
+#
+# All real values come from the shared ignored ../../.env:
+#
+# A365_EXP3_TARGET_NAME=<selected-package-display-name>
+# A365_EXP3_PACKAGE_ID=<registry-sync-package-id>
+# A365_EXP3_PROVIDER_SOURCE_AGENT_ID=<exact-provider-source-agent-id>
+# A365_EXP3_SOURCE_CREATED_AT=<exact-source-created-timestamp>
+# A365_EXP3_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp>
+# A365_EXP3_BLUEPRINT_OBJECT_ID=<blueprint-application-object-id>
+# A365_EXP3_BLUEPRINT_APP_ID=<blueprint-app-id>
+# A365_EXP3_AGENT_IDENTITY_ID=<agent-identity-object-id>
+#
+# Evidence belongs only under:
+# ../../evidence/experiments/03-companion-source-registration-create/
+#
+# Run one request at a time. Never use "Send All".
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@targetName = {{$dotenv A365_EXP3_TARGET_NAME}}
+@packageId = {{$dotenv A365_EXP3_PACKAGE_ID}}
+@providerSourceAgentId = {{$dotenv A365_EXP3_PROVIDER_SOURCE_AGENT_ID}}
+@sourceCreatedAt = {{$dotenv A365_EXP3_SOURCE_CREATED_AT}}
+@sourceModifiedAt = {{$dotenv A365_EXP3_SOURCE_MODIFIED_AT}}
+@blueprintObjectId = {{$dotenv A365_EXP3_BLUEPRINT_OBJECT_ID}}
+@blueprintAppId = {{$dotenv A365_EXP3_BLUEPRINT_APP_ID}}
+@agentIdentityId = {{$dotenv A365_EXP3_AGENT_IDENTITY_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@experimentScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+
+###############################################################################
+# Step 3.1 - Authenticate
+#
+# DO NOT SAVE either authentication response.
+
+# @name exp3DeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{experimentScopes}}
+
+###
+
+# Complete browser sign-in before sending this request.
+
+# @name exp3Token
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{exp3DeviceCode.response.body.$.device_code}}
+
+###
+
+# @name exp3CurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3.2 - Read-only preflight
+#
+# SAVE REQUIRED: Package response as package-before-create.json.
+
+# @name exp3PackageBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# Confirm the Package contains the exact provider source ID from .env.
+# SAVE REQUIRED: Blueprint response as blueprint-before-create.json.
+
+# @name exp3Blueprint
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+# SAVE REQUIRED: Agent Identity response as identity-before-create.json.
+
+# @name exp3AgentIdentity
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3A - approve exactly one create
+#
+# Continue only when:
+# - the Package, provider source, Blueprint, and Agent Identity all match .env;
+# - the Agent Identity belongs to the selected Blueprint;
+# - no active or unresolved companion mapping exists for this provider source;
+# - the target is disposable and approved; and
+# - one create attempt is explicitly authorized.
+#
+# The Registration source is deliberately different from the provider source:
+#
+# agent-governance:companion:v1:gcp:<exact-provider-source-agent-id>
+#
+# SAVE REQUIRED: response body as registration-create-response.json and record
+# the HTTP status separately. On timeout or 5xx, stop and do not retry.
+
+# @name exp3CreateCompanion
+POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+OData-Version: 4.0
+
+{
+  "displayName": "{{targetName}} - managed companion",
+  "description": "Disposable independently managed companion registration",
+  "createdBy": "{{exp3CurrentUser.response.body.$.id}}",
+  "ownerIds": [
+    "{{exp3CurrentUser.response.body.$.id}}"
+  ],
+  "sourceAgentId": "agent-governance:companion:v1:gcp:{{providerSourceAgentId}}",
+  "originatingStore": "GoogleVertexAI",
+  "sourceCreatedDateTime": "{{sourceCreatedAt}}",
+  "sourceLastModifiedDateTime": "{{sourceModifiedAt}}",
+  "agentIdentityBlueprintId": "{{blueprintAppId}}",
+  "agentIdentityId": "{{agentIdentityId}}"
+}
+
+###
+
+###############################################################################
+# Step 3.3 - Read back only after 201
+#
+# SAVE REQUIRED: response body as registration-after-create.json.
+
+# @name exp3GetCreatedCompanion
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{exp3CreateCompanion.response.body.$.id}}
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+# Confirm the returned source, Blueprint, Agent Identity, owner, and platform.
+# SAVE REQUIRED: response body as package-after-create.json.
+
+# @name exp3PackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3B - save the mapping
+#
+# Save the provider source, current Package ID, companion source, returned
+# Registration ID, Blueprint app ID, and Agent Identity ID in protected local
+# state. Do not delete the companion until the rename and delete demos have
+# completed or separate cleanup is approved.

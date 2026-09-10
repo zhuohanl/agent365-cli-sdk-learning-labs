@@ -6,12 +6,31 @@ import unittest
 
 
 LAB = Path(__file__).resolve().parents[1]
-DEMO = LAB / "trial-1-http-tests" / "companion-registration-demo.http"
+HTTP_ROOT = LAB
+DEMO = HTTP_ROOT / "demos" / "01-add-companion" / "demo.http"
 RENAME_DEMO = (
-    LAB / "trial-1-http-tests" / "companion-registration-demo-rename.http"
+    HTTP_ROOT / "demos" / "02-rename-companion" / "demo.http"
 )
 DELETE_DEMO = (
-    LAB / "trial-1-http-tests" / "companion-registration-demo-delete.http"
+    HTTP_ROOT / "demos" / "03-delete-companion" / "demo.http"
+)
+SOURCE_ID_STABILITY_DEMO = (
+    HTTP_ROOT / "experiments" / "04-source-id-stability" / "experiment.http"
+)
+PACKAGE_LOOKUP_EXPERIMENT = (
+    HTTP_ROOT / "experiments" / "01-package-registration-lookup" / "experiment.http"
+)
+PROVIDER_SOURCE_CREATE_EXPERIMENT = (
+    HTTP_ROOT
+    / "experiments"
+    / "02-provider-source-registration-create"
+    / "experiment.http"
+)
+COMPANION_SOURCE_CREATE_EXPERIMENT = (
+    HTTP_ROOT
+    / "experiments"
+    / "03-companion-source-registration-create"
+    / "experiment.http"
 )
 
 
@@ -22,6 +41,43 @@ def named_blocks(text):
         for block in blocks
         if (match := re.search(r"(?m)^# @name (\S+)$", block))
     }
+
+
+class HttpExperimentStructureTests(unittest.TestCase):
+    def test_package_lookup_tries_both_candidate_ids(self):
+        text = PACKAGE_LOOKUP_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        self.assertIn("getRegistrationUsingPackageIdNegativeProbe", blocks)
+        self.assertIn("getRegistrationUsingProviderSourceIdNegativeProbe", blocks)
+        self.assertIn("A365_SAMPLE_SOURCE_AGENT_ID_PATH", text)
+
+    def test_provider_source_create_omits_identity_fields(self):
+        text = PROVIDER_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
+        create = named_blocks(text)["createCorrelationRegistration"]
+        self.assertIn('"sourceAgentId": "{{sourceAgentId}}"', create)
+        self.assertNotIn('"agentIdentityBlueprintId"', create)
+        self.assertNotIn('"agentIdentityId"', create)
+
+    def test_companion_source_create_includes_identity_fields(self):
+        text = COMPANION_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
+        create = named_blocks(text)["exp3CreateCompanion"]
+        self.assertIn(
+            '"sourceAgentId": "agent-governance:companion:v1:gcp:{{providerSourceAgentId}}"',
+            create,
+        )
+        self.assertIn('"agentIdentityBlueprintId": "{{blueprintAppId}}"', create)
+        self.assertIn('"agentIdentityId": "{{agentIdentityId}}"', create)
+
+    def test_demo_order_keeps_delete_last(self):
+        readme = (HTTP_ROOT / "http-experiments.md").read_text(encoding="utf-8")
+        self.assertLess(
+            readme.index("demos/01-add-companion"),
+            readme.index("demos/02-rename-companion"),
+        )
+        self.assertLess(
+            readme.index("demos/02-rename-companion"),
+            readme.index("demos/03-delete-companion"),
+        )
 
 
 class HttpCompanionDemoTests(unittest.TestCase):
@@ -66,9 +122,11 @@ class HttpCompanionDemoTests(unittest.TestCase):
 
     def test_create_uses_deterministic_companion_source(self):
         self.assertIn(
-            '"sourceAgentId": "committed-fleet:companion:v1:gcp:{{providerSourceAgentId}}"',
+            '"sourceAgentId": "agent-governance:companion:v1:gcp:{{providerSourceAgentId}}"',
             self.text,
         )
+        create_block = named_blocks(self.text)["demoCreateFreshCompanion"]
+        self.assertNotIn("committed-fleet:companion", create_block)
         self.assertIn('"agentIdentityBlueprintId": "{{blueprintAppId}}"', self.text)
         self.assertIn('"agentIdentityId": "{{agentIdentityId}}"', self.text)
         self.assertIn('"createdBy": "{{demoCurrentUser.response.body.$.id}}"', self.text)
@@ -213,6 +271,151 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
         self.assertNotIn("/oauth2/v2.0/token", self.text)
         self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")
         self.assertIn('Never use "Send All".', self.text)
+
+
+class HttpCompanionSourceIdStabilityDemoTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SOURCE_ID_STABILITY_DEMO.read_text(encoding="utf-8")
+        cls.blocks = named_blocks(cls.text)
+
+    def test_covers_control_rename_rematerialization_and_recreate(self):
+        for heading in (
+            "# Phase 0 - No-change control",
+            "# Phase 1 - Rename and rename back",
+            "# Phase 2 - Registry Sync rematerialization",
+            "# Phase 3 - Delete and recreate the provider agent",
+        ):
+            self.assertIn(heading, self.text)
+
+    def test_decisive_comparison_is_documented(self):
+        self.assertIn(
+            "same exact provider sourceAgentId + different Package ID",
+            self.text,
+        )
+        self.assertIn(
+            "Package identity depends on the import/connection representation",
+            self.text,
+        )
+        self.assertIn(
+            "Do not create a companion to test either candidate.",
+            self.text,
+        )
+
+    def test_rename_back_requires_current_package_id(self):
+        self.assertIn(
+            "A365_STABILITY_AFTER_RENAME_BACK_PACKAGE_ID=<current-package-id>",
+            self.text,
+        )
+        checkpoint = self.text.index(
+            "# Before sending stabilityRenameBackPackage"
+        )
+        request = self.text.index("# @name stabilityRenameBackPackage")
+        self.assertLess(checkpoint, request)
+
+    def test_phase_two_gcp_read_has_token_refresh_guidance(self):
+        checkpoint = self.text.index("# GCP token refresh checkpoint")
+        request = self.text.index(
+            "# @name stabilityPhase2GetGcpBeforeConnectionRecreate"
+        )
+        self.assertLess(checkpoint, request)
+        self.assertIn("gcloud auth login", self.text[checkpoint:request])
+        self.assertIn("gcloud auth print-access-token", self.text[checkpoint:request])
+        self.assertIn("GCP_STABILITY_ACCESS_TOKEN", self.text[checkpoint:request])
+
+    def test_destructive_requests_follow_explicit_stop_checkpoints(self):
+        rename_stop = self.text.index("# Stop 1A - approve one provider display-name PATCH")
+        rename_patch = self.text.index("\nPATCH {{gcpBaseUrl}}")
+        connection_stop = self.text.index(
+            "# Stop 2B - approve deletion of the existing experimental connection"
+        )
+        phase2_list = self.text.index(
+            "# @name stabilityPhase2ListAfterConnectionDelete"
+        )
+        delete_stop = self.text.index(
+            "# Stop 3A - irreversible provider deletion approval"
+        )
+        original_delete = self.text.index(
+            "\nDELETE {{gcpBaseUrl}}/v1/projects/{{gcpProjectId}}"
+        )
+        create_stop = self.text.index(
+            "# Stop 3D - manually create the replacement in Agent Studio"
+        )
+        replacement_get = self.text.index(
+            "# @name stabilityGetReplacementGcpAgent"
+        )
+
+        self.assertLess(rename_stop, rename_patch)
+        self.assertLess(connection_stop, phase2_list)
+        self.assertLess(delete_stop, original_delete)
+        self.assertLess(create_stop, replacement_get)
+
+    def test_does_not_create_or_read_a_companion(self):
+        self.assertNotIn("/agentRegistrations", self.text)
+        self.assertNotIn("AgentRegistration.Read.All", self.text)
+        self.assertIn(
+            "Do not create a companion to test either candidate.",
+            self.text,
+        )
+
+    def test_phase_two_does_not_invent_connection_endpoint(self):
+        self.assertIn(
+            "There is no reviewed public Graph or Agent 365 CLI operation",
+            self.text,
+        )
+        self.assertNotRegex(
+            self.text,
+            r"(?m)^(POST|PATCH|DELETE) .*connected.?platform",
+        )
+
+    def test_recreate_uses_original_agent_studio_workflow(self):
+        self.assertIn(
+            "phase-3-portal-recreation-checklist.txt",
+            self.text,
+        )
+        self.assertIn(
+            "Google Cloud portal -> Agent Studio",
+            self.text,
+        )
+        self.assertNotRegex(
+            self.text,
+            r"(?m)^POST .*reasoningEngines",
+        )
+
+    def test_every_request_states_whether_to_save_evidence(self):
+        do_not_save = {
+            "stabilityStartDeviceCode",
+            "stabilityExchangeDeviceCode",
+            "stabilityCurrentUser",
+        }
+        for name, block in self.blocks.items():
+            marker = "DO NOT SAVE" if name in do_not_save else "SAVE REQUIRED"
+            self.assertIn(marker, block, name)
+
+    def test_file_contains_no_literal_credentials(self):
+        self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")
+        self.assertIn("GCP_STABILITY_ACCESS_TOKEN", self.text)
+        self.assertIn('Never use "Send All".', self.text)
+
+    def test_uses_explicit_device_code_flow_for_graph(self):
+        self.assertIn(
+            "POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode",
+            self.text,
+        )
+        self.assertIn(
+            "POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token",
+            self.text,
+        )
+        self.assertIn("client_id={{clientId}}&scope={{graphReadScope}}", self.text)
+        self.assertIn(
+            "device_code={{stabilityStartDeviceCode.response.body.$.device_code}}",
+            self.text,
+        )
+        self.assertIn(
+            "{{stabilityExchangeDeviceCode.response.body.$.access_token}}",
+            self.text,
+        )
+        self.assertNotIn("$aadV2Token", self.text)
 
 
 if __name__ == "__main__":

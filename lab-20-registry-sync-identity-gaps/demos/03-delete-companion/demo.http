@@ -11,7 +11,7 @@
 # require separate approval. Registration deletion is irreversible.
 # Agent Identity deletion is soft deletion; it is not permanent purge.
 #
-# Put all real values in this folder's ignored .env file:
+# Put all real values in the shared ignored ../../.env file:
 #
 # A365_TENANT_ID=<directory-tenant-id>
 # A365_CLIENT_ID=<public-client-application-id>
@@ -20,6 +20,9 @@
 # A365_DEMO_BLUEPRINT_APP_ID=<platform-blueprint-app-id>
 # A365_DEMO_AGENT_IDENTITY_ID=<dedicated-agent-identity-id>
 # A365_DEMO_COMPANION_REGISTRATION_ID=<companion-registration-id>
+#
+# Save private responses only under:
+# ../../evidence/demos/03-delete-companion/
 #
 # This file never deletes the platform Blueprint or Registry Sync connection.
 
@@ -80,8 +83,9 @@ Accept: application/json
 # Expected: 200.
 # Confirm:
 # - ID equals A365_DEMO_COMPANION_REGISTRATION_ID
-# - sourceAgentId equals
+# - sourceAgentId equals the legacy value created by the earlier experiment:
 #   committed-fleet:companion:v1:gcp:<exact-provider-source-id>
+# - do not delete solely to replace that legacy namespace
 # - Blueprint and Agent Identity links match the durable mapping
 
 # @name deleteGetRegistrationBefore
