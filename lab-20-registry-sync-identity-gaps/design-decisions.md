@@ -273,34 +273,98 @@ This flow follows the rightmost concept in
 the platforms first, prepare the shared Blueprint at platform scope, and then
 loop through each Package to create or resolve the per-agent objects.
 
+All three lifecycle diagrams below use the same regions, so they can be read
+against each other:
+
+| Region | Colour | Meaning |
+| --- | --- | --- |
+| Discovery / detection | Amber | Read-only observation before any decision |
+| PART 1 | Blue | Blueprint, platform scope, shared |
+| PART 2 | Purple | Agent Identity, one per scoped provider source |
+| PART 3 | Green | Companion Registration, one per scoped provider source |
+| Loop / gate | Grey | Iteration boundary or approval gate |
+
 ```mermaid
-flowchart TD
-    A[Configure Registry Sync] --> B[Read every Package List page]
-    B --> C[Group Packages by platform]
-    C --> D{Next platform}
-    D -->|Yes| E[Resolve approved platform Blueprint and principal]
-    E --> F{Blueprint available}
-    F -->|No| G[Create one approved Blueprint for the platform]
-    F -->|Yes| H{Next Package in this platform}
-    G --> H
-    H -->|Yes| I[Read Package Details and exact scoped provider source key]
-    I --> J[Reconcile durable mapping]
-    J --> K{Active or unresolved companion already recorded}
-    K -->|Yes| L[Read and verify the mapped objects]
-    K -->|No| M[Resolve or create one Agent Identity under the platform Blueprint]
-    M --> N[Create one companion Registration with deterministic companion source ID]
-    N --> O[Save returned Registration ID immediately]
-    O --> L
-    L --> P[Persist source, Package, Blueprint, Identity, and Registration mapping]
-    P --> Q[Re-read original Registry Sync Package]
-    Q --> H
-    H -->|No| D
-    D -->|No| R[Finish reconciliation]
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
+flowchart TB
+    subgraph DISCOVERY["<b>DISCOVERY</b> - read only"]
+        direction TB
+        A1["Read every<br/>Package List page"]
+        A2["Group Packages<br/>by platform"]
+        A1 --> A2
+    end
+
+    subgraph PART1["<b>PART 1: BLUEPRINT</b> - once per platform"]
+        direction TB
+        B1{"Approved platform<br/>Blueprint exists?"}
+        B2["Create one approved<br/>platform Blueprint"]
+        B3["Blueprint ID<br/>shared by the platform"]
+        B1 -->|No| B2
+        B2 --> B3
+        B1 -->|Yes| B3
+    end
+
+    subgraph LOOP["<b>FOR EACH PACKAGE</b> in the platform - repeat Parts 2 and 3"]
+        direction TB
+        C1["Read Package Details"]
+        C2["Companion source ID<br/>built from the exact scoped<br/>provider sourceAgentId"]
+        C1 --> C2
+
+        subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - one per source"]
+            direction TB
+            D1{"Identity already<br/>mapped?"}
+            D2["Create Agent Identity<br/>under the platform Blueprint"]
+            D3["Agent Identity ID"]
+            D1 -->|No| D2
+            D2 --> D3
+            D1 -->|Yes| D3
+        end
+
+        subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - one per source"]
+            direction TB
+            E0["Registration POST needs<br/>all three inputs together"]
+            E1{"Companion already<br/>recorded?"}
+            E2["Reconcile the recorded<br/>outcome, create nothing"]
+            E3["POST one companion<br/>Registration"]
+            E4["Registration ID"]
+            E0 --> E1
+            E1 -->|Yes| E2
+            E1 -->|No| E3
+            E3 --> E4
+        end
+
+        F1["Persist the mapping:<br/>source, Package, Blueprint,<br/>Identity, Registration"]
+        F2["Re-read the original<br/>Registry Sync Package"]
+        E2 --> F1
+        E4 --> F1
+        F1 --> F2
+    end
+
+    A2 --> B1
+    B3 --> C1
+    C2 --> D1
+    B3 -.->|"input 1: Blueprint ID"| E0
+    D3 -->|"input 2: Agent Identity ID"| E0
+    C2 -.->|"input 3: companion source ID"| E0
+    F2 --> G1["Finish when every Package<br/>and platform is reconciled"]
+
+    style DISCOVERY fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
+    style PART1 fill:#e8f1fd,stroke:#1d4ed8,stroke-width:4px,color:#1e3a8a
+    style PART2 fill:#f3ecfd,stroke:#6d28d9,stroke-width:4px,color:#4c1d95
+    style PART3 fill:#e7f8f0,stroke:#047857,stroke-width:4px,color:#064e3b
+    style LOOP fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
 ```
 
-The loop owns one mapping entry, one Agent Identity, and one companion
-Registration per scoped provider source. The platform Blueprint is shared
-preparation outside that per-Package loop.
+The three dotted and solid inputs into Part 3 are the point of the diagram: a
+companion Registration POST is only possible once the platform Blueprint ID
+from Part 1, the Agent Identity ID from Part 2, and the deterministic companion
+source ID derived from the exact scoped provider `sourceAgentId` all exist for
+the same source.
+
+Part 1 is shared preparation performed once for each platform. The outer
+Package loop then runs Parts 2 and 3 separately for each scoped provider
+source. That loop owns one mapping entry, one Agent Identity, and one companion
+Registration per source; it reuses the platform Blueprint prepared in Part 1.
 
 ## DD-005: Delete lifecycle
 
@@ -357,27 +421,93 @@ to its documented semantics. Do not recreate the Registration as recovery.
 
 ### Delete flow
 
+The three parts are read top to bottom in the same order as the add flow. The
+write order is deliberately the reverse: the companion Registration is always
+deleted before the Agent Identity, and the platform Blueprint is never part of
+per-agent cleanup. The ordered execution block at the bottom carries that
+constraint.
+
 ```mermaid
-flowchart TD
-    A[Refresh every Package List page] --> B{Same scoped provider source key present}
-    B -->|Yes, same Package ID| C[Keep companion and refresh last-observed state]
-    B -->|Yes, new Package ID| D[Update only the Package pointer]
-    B -->|No| E[Mark source-missing-candidate]
-    E --> F{Provider deletion, healthy sync, and grace period all confirmed}
-    F -->|No| G[Mark reconciliation-required and stop]
-    F -->|Yes| H[Lock mapping and read Registration, Agent Identity, and dependencies]
-    H --> I{Registration retirement approved}
-    I -->|No| G
-    I -->|Yes| J[DELETE mapped companion Registration]
-    J --> K[GET Registration and require 404]
-    K --> L[Re-read Package inventory independently]
-    L --> M{Dedicated Agent Identity has no remaining consumers and deletion is approved}
-    M -->|No| N[Record registration-deleted identity-retained]
-    M -->|Yes| O[DELETE dedicated Agent Identity]
-    O --> P[GET active Agent Identity and require 404]
-    N --> Q[Write durable tombstone]
-    P --> Q
-    Q --> R[Retain shared platform Blueprint]
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
+flowchart TB
+    subgraph DETECT["<b>DETECTION</b> - read only"]
+        direction TB
+        A1["Refresh every<br/>Package List page"]
+        A2{"Scoped provider<br/>source key still<br/>present?"}
+        A3["Same Package ID:<br/>keep companion,<br/>refresh state"]
+        A4["New Package ID:<br/>update the Package<br/>pointer only"]
+        A5["Mark<br/>source-missing-candidate"]
+        A1 --> A2
+        A2 -->|Yes, same Package ID| A3
+        A2 -->|Yes, new Package ID| A4
+        A2 -->|No| A5
+    end
+
+    subgraph GATE["<b>CONFIRMATION GATE</b> - nothing is deleted yet"]
+        direction TB
+        B1{"Provider deletion,<br/>healthy sync, and<br/>grace period all<br/>confirmed?"}
+        B2["Mark reconciliation-required<br/>and stop"]
+        B3["Lock mapping; read<br/>Registration, Identity,<br/>and dependents"]
+        B1 -->|No| B2
+        B1 -->|Yes| B3
+    end
+
+    subgraph PART1["<b>PART 1: BLUEPRINT</b> - retained"]
+        direction TB
+        C1["Shared platform scope:<br/>retain the Blueprint and<br/>exclude it from cleanup"]
+    end
+
+    subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - decide disposition"]
+        direction TB
+        D1{"Dedicated to this source,<br/>no remaining consumers,<br/>separately approved?"}
+        D2["Plan: retain the<br/>Agent Identity"]
+        D3["Plan: delete the<br/>Agent Identity"]
+        D1 -->|No| D2
+        D1 -->|Yes| D3
+    end
+
+    subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - decide retirement"]
+        direction TB
+        E1{"Registration retirement<br/>approved?"}
+        E2["Plan: delete the mapped<br/>companion Registration"]
+        E3["Mark reconciliation-required<br/>and stop"]
+        E1 -->|Yes| E2
+        E1 -->|No| E3
+    end
+
+    subgraph EXEC["<b>ORDERED EXECUTION</b> - Registration before Identity"]
+        direction TB
+        F1["Step 1: DELETE the mapped<br/>companion Registration"]
+        F2["Step 2: GET the Registration<br/>and require 404"]
+        F3["Step 3: re-read Package<br/>inventory independently"]
+        F4{"Identity deletion<br/>planned?"}
+        F5["Record registration-deleted,<br/>identity-retained"]
+        F6["Step 4: DELETE the<br/>dedicated Agent Identity"]
+        F7["Step 5: GET the Identity<br/>and require 404"]
+        F8["Step 6: write the<br/>durable tombstone"]
+        F1 --> F2
+        F2 --> F3
+        F3 --> F4
+        F4 -->|No| F5
+        F4 -->|Yes| F6
+        F6 --> F7
+        F5 --> F8
+        F7 --> F8
+    end
+
+    A5 --> B1
+    B3 --> C1
+    C1 --> D1
+    D2 --> E1
+    D3 --> E1
+    E2 --> F1
+
+    style DETECT fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
+    style GATE fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
+    style PART1 fill:#e8f1fd,stroke:#1d4ed8,stroke-width:4px,color:#1e3a8a
+    style PART2 fill:#f3ecfd,stroke:#6d28d9,stroke-width:4px,color:#4c1d95
+    style PART3 fill:#e7f8f0,stroke:#047857,stroke-width:4px,color:#064e3b
+    style EXEC fill:#fdeaea,stroke:#b91c1c,stroke-width:3px,color:#7f1d1d
 ```
 
 The destructive path uses only IDs recovered from the locked mapping.
@@ -461,29 +591,73 @@ propagation must be established in a bounded experiment before automation.
 
 ### Rename flow
 
+Rename reads the same three parts top to bottom. Part 1 is a confirmation
+checkpoint with no write; only Parts 2 and 3 change a display name.
+
 ```mermaid
-flowchart TD
-    A[Capture Package and mapped objects before rename] --> B[Rename only the disposable provider agent]
-    B --> C[Wait for healthy Registry Sync and propagation period]
-    C --> D[Read every Package List page and selected Package Details]
-    D --> E{Old and new Package records coexist}
-    E -->|Yes| F[Stop for duplication reconciliation]
-    E -->|No| G{Provider scope and exact sourceAgentId unchanged}
-    G -->|No| H[Mark identity-key migration or replacement as reconciliation-required]
-    G -->|Yes| I{Package ID changed}
-    I -->|Yes| J[Update only the Package pointer]
-    I -->|No| K[Keep existing Package pointer]
-    J --> L[Record new source display name]
-    K --> L
-    L --> M[GET mapped Agent Identity and companion Registration]
-    M --> N{Display-name update approved}
-    N -->|No| O[Keep mappings and companion objects unchanged]
-    N -->|Yes| P[PATCH Agent Identity displayName]
-    P --> Q[GET and verify same Identity and Blueprint IDs]
-    Q --> R[PATCH companion Registration displayName]
-    R --> S[GET and verify same Registration, source, Blueprint, and Identity IDs]
-    S --> T[Re-read Package inventory and observe propagation]
-    T --> U[Persist rename result in durable mapping]
+%%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
+flowchart TB
+    subgraph DETECT["<b>DETECTION</b> - read only"]
+        direction TB
+        A1["Capture the Package<br/>and mapped objects"]
+        A2["Rename only the disposable<br/>provider agent"]
+        A3["Wait for healthy sync<br/>and propagation"]
+        A4["Read Package List pages<br/>and Package Details"]
+        A5{"Old and new Package<br/>records coexist?"}
+        A6["Stop for duplication<br/>reconciliation"]
+        A7{"Provider scope and exact<br/>sourceAgentId unchanged?"}
+        A8["Mark reconciliation-required:<br/>migration or replacement"]
+        A9["Update the Package pointer<br/>only if the Package ID changed"]
+        A1 --> A2
+        A2 --> A3
+        A3 --> A4
+        A4 --> A5
+        A5 -->|Yes| A6
+        A5 -->|No| A7
+        A7 -->|No| A8
+        A7 -->|Yes| A9
+    end
+
+    subgraph GATE["<b>VERIFICATION GATE</b> - nothing is written yet"]
+        direction TB
+        B1["GET the mapped Agent Identity<br/>and companion Registration"]
+        B2{"Display-name update<br/>approved?"}
+        B3["Keep both companion<br/>objects unchanged"]
+        B1 --> B2
+        B2 -->|No| B3
+    end
+
+    subgraph PART1["<b>PART 1: BLUEPRINT</b> - no write"]
+        direction TB
+        C1["Confirm the Blueprint and<br/>every identifier are unchanged"]
+    end
+
+    subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - rename"]
+        direction TB
+        D1["PATCH the Agent Identity<br/>displayName"]
+        D2["GET and verify the same<br/>Identity and Blueprint IDs"]
+        D1 --> D2
+    end
+
+    subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - rename"]
+        direction TB
+        E1["PATCH the Registration<br/>displayName"]
+        E2["GET and verify the same<br/>Registration, source,<br/>Blueprint, and Identity IDs"]
+        E1 --> E2
+    end
+
+    A9 --> B1
+    B2 -->|Yes| C1
+    C1 --> D1
+    D2 --> E1
+    E2 --> F1["Re-read Package inventory<br/>and observe propagation"]
+    F1 --> F2["Persist the rename result<br/>in the durable mapping"]
+
+    style DETECT fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
+    style GATE fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
+    style PART1 fill:#e8f1fd,stroke:#1d4ed8,stroke-width:4px,color:#1e3a8a
+    style PART2 fill:#f3ecfd,stroke:#6d28d9,stroke-width:4px,color:#4c1d95
+    style PART3 fill:#e7f8f0,stroke:#047857,stroke-width:4px,color:#064e3b
 ```
 
 No PATCH, POST, or DELETE is allowed on the default observation path until
