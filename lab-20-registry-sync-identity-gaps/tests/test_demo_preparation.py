@@ -189,6 +189,7 @@ class DemoPreparationTests(unittest.TestCase):
             "A365_DEMO_TARGET_NAME": self.target,
             "A365_DEMO_ORIGINAL_PACKAGE_ID": self.package_id,
             "A365_DEMO_PROVIDER_SOURCE_AGENT_ID": self.source,
+            "A365_DEMO_SOURCE_MODIFIED_AT": self.modified,
             "A365_DEMO_ASSIGNMENT_MODE": "dedicated",
             "A365_DEMO_BLUEPRINT_OBJECT_ID": self.blueprint_object_id,
             "A365_DEMO_BLUEPRINT_APP_ID": self.blueprint_app_id,
@@ -197,16 +198,19 @@ class DemoPreparationTests(unittest.TestCase):
         blueprint = {
             "id": self.blueprint_object_id,
             "appId": self.blueprint_app_id,
+            "displayName": f"{self.target} - dedicated disposable Blueprint",
         }
         principal = {
             "id": "00000000-0000-4000-8000-000000000004",
             "appId": self.blueprint_app_id,
             "accountEnabled": True,
+            "displayName": f"{self.target} - dedicated disposable Blueprint",
         }
         identity = {
             "id": self.identity_id,
             "agentIdentityBlueprintId": self.blueprint_app_id,
             "servicePrincipalType": "ServiceIdentity",
+            "displayName": f"{self.target} - managed Agent Identity",
         }
         registration = {
             "id": self.registration_id,
@@ -214,6 +218,7 @@ class DemoPreparationTests(unittest.TestCase):
             "originatingStore": "GoogleVertexAI",
             "agentIdentityBlueprintId": self.blueprint_app_id,
             "agentIdentityId": self.identity_id,
+            "displayName": f"{self.target} - managed companion",
         }
         companion_definition = {
             "SourceAgentId": prepare_demo.COMPANION_PREFIX + self.source,
@@ -222,6 +227,7 @@ class DemoPreparationTests(unittest.TestCase):
         }
         companion_package = {
             "id": "fixture-companion-package",
+            "displayName": f"{self.target} - managed companion",
             "platform": "GoogleVertexAI",
             "agentIdentityId": self.identity_id,
             "elementDetails": [
@@ -266,6 +272,34 @@ class DemoPreparationTests(unittest.TestCase):
             prepare_demo.LAB_APPROVAL_REFERENCE,
         )
         self.assertEqual(mapping["members"], [self.source])
+        self.assertEqual(mapping["packageDisplayName"], self.target)
+        self.assertEqual(
+            mapping["blueprintDisplayName"],
+            f"{self.target} - dedicated disposable Blueprint",
+        )
+        self.assertEqual(
+            mapping["blueprintPrincipalDisplayName"],
+            f"{self.target} - dedicated disposable Blueprint",
+        )
+        self.assertEqual(
+            mapping["agentIdentityDisplayName"],
+            f"{self.target} - managed Agent Identity",
+        )
+        self.assertEqual(
+            mapping["companionRegistrationDisplayName"],
+            f"{self.target} - managed companion",
+        )
+        self.assertEqual(
+            mapping["companionPackageDisplayName"],
+            f"{self.target} - managed companion",
+        )
+        self.assertEqual(mapping["nameSyncStatus"], "in-sync")
+        self.assertEqual(mapping["status"], "active")
+        self.assertEqual(
+            mapping["sourceLastModifiedDateTime"],
+            self.modified,
+        )
+        self.assertTrue(mapping["lastObservedAt"])
         self.assertEqual(
             mapping["blueprintPrincipalId"],
             "00000000-0000-4000-8000-000000000004",

@@ -197,8 +197,14 @@ Persist at least:
 | `agentIdentityId` | Actual Entra Agent Identity object ID used by the companion. |
 | `status` | Planned, pending, created, failed, deleted, or reconciliation-required. |
 | `lastObservedAt` | Time at which the relationship was last verified. |
-| `sourceDisplayName` | Latest non-authoritative display name observed from Registry Sync. |
-| `companionDisplayName` | Last display name successfully applied to the companion objects. |
+| `packageDisplayName` | Latest non-authoritative display name observed on the provider-owned Registry Sync Package. |
+| `blueprintDisplayName` | Last display name observed on the mapped Blueprint. |
+| `blueprintPrincipalDisplayName` | Last display name observed on the mapped Blueprint principal. |
+| `agentIdentityDisplayName` | Last display name observed on the mapped Agent Identity. |
+| `companionRegistrationDisplayName` | Last display name observed on the companion Registration. |
+| `companionPackageDisplayName` | Last display name observed on the materialized companion Package. |
+| `nameSyncStatus` | `in-sync` when every in-scope name follows policy, `pending` when one or more names differ, or `blocked` when a required update cannot safely run. |
+| `sourceLastModifiedDateTime` | Exact provider source modification time observed in Package Details. |
 
 Enforce one active companion per scoped provider source key and one scoped
 provider source key per active companion Registration ID. Treat a POST timeout
@@ -742,60 +748,101 @@ or dedicated group Blueprint is not part of per-agent cleanup.
 
 A provider-side display-name change does not change the agent's identity when
 the DD-003 scoped provider source key remains exactly the same. Rename is an
-in-place metadata update. It must not create a new Blueprint, Agent Identity,
-or companion Registration.
+in-place metadata reconciliation. It must not create a new Blueprint, Agent
+Identity, or companion Registration.
+
+The provider-owned Registry Sync Package is the name source. The committed
+fleet does not compare the provider Package name directly with the companion
+Package name because the managed objects intentionally use suffixes. Instead,
+it calculates each expected name from `packageDisplayName` and compares that
+expected value with the observed name saved for each object.
+
+For a dedicated assignment, the expected names are:
+
+```text
+Provider Package:       <provider name>
+Blueprint:              <provider name> - dedicated disposable Blueprint
+Blueprint principal:    <provider name> - dedicated disposable Blueprint
+Agent Identity:         <provider name> - managed Agent Identity
+Companion Registration: <provider name> - managed companion
+Companion Package:      <provider name> - managed companion
+```
+
+For a shared assignment, the Blueprint and principal keep their approved
+group-level name. For example, renaming `Support Agent A` does not rename
+`Support Team Blueprint`, because `Support Agent B` may use it too. The
+source-specific Agent Identity, Registration, and companion Package remain in
+the per-agent name synchronization scope.
+
+The default trigger is periodic reconciliation because no applicable Registry
+Sync rename notification has been established by this experiment. A run:
+
+1. Uses the mapped `packageId` for a fast Package Details read.
+2. Verifies platform, provider scope, and exact `sourceAgentId`.
+3. If the Package is missing or no longer matches, scans every inventory page
+   to relocate the same stable provider source key and updates only
+   `packageId`.
+4. Compares the current Package `displayName` with the mapping's
+   `packageDisplayName`.
+5. When they differ, saves the new provider name immediately and sets
+   `nameSyncStatus` to `pending` before attempting any write.
+
+The interval is deployment policy, not identity semantics. Daily polling is a
+reasonable starting point, but the implementation should make it configurable
+and support an operator-requested run.
 
 Use this reconciliation sequence:
 
-1. Read every Package List page and the selected Package Details.
-2. Match the Package to the existing mapping using the exact scoped provider
-   source key. Do not match by display name.
-3. If the source key is unchanged and only the Package/provider display name
-   changed, record `rename-observed` and update `sourceDisplayName`.
-4. Keep the existing mapped group Blueprint, Agent Identity ID, companion source
-   ID, and companion Registration ID.
-5. Calculate the intended companion display name from the new source display
-   name and the companion display-name convention. Do not reconstruct or
-   modify the companion source ID.
-6. GET the mapped Blueprint, enabled Blueprint principal, Agent Identity, and
-   companion Registration. Verify the assignment binding, IDs, source
-   relationship, and ownership before changing either object.
-7. PATCH the Agent Identity `displayName` through its typed v1.0 endpoint and
-   PATCH the known companion Registration `displayName` through its beta
-   endpoint. The Registration update can also carry the newly observed
-   `sourceLastModifiedDateTime` when that provider value is available and has
-   been preserved exactly.
-8. GET both objects again and require the intended names. Update
-   `companionDisplayName`, rename timestamps, and final status in the mapping.
-9. Re-read Package inventory and the original Package independently. Observe
-   whether the companion Package representation follows the Registration
-   rename; do not assume that propagation is immediate. The original Package's
-   display name remains owned by Registry Sync, so do not PATCH it to force
-   alignment.
+1. Read and save the mapped Blueprint, Blueprint principal, Agent Identity,
+   companion Registration, and companion Package. Verify every immutable ID
+   and relationship before changing a name.
+2. For a dedicated assignment, PATCH the Blueprint `displayName`, then GET and
+   verify it.
+3. GET the Blueprint principal after the Blueprint update. If it follows
+   automatically, record the observed name. If it does not, treat its update as
+   a separately authorized operation because the documented general
+   service-principal update requires broader permission. Do not request broad
+   tenant consent as part of routine reconciliation.
+4. For a shared assignment, skip both Blueprint and principal rename. Their
+   approved group-level names are already in policy.
+5. PATCH the Agent Identity `displayName` through its typed v1.0 endpoint, then
+   GET and verify the same Identity and Blueprint IDs.
+6. PATCH the known companion Registration `displayName` and exact
+   `sourceLastModifiedDateTime` through its beta endpoint, then GET and verify
+   its source, Blueprint, Identity, and owner fields.
+7. GET the companion Package by its mapped Package ID. Observe whether the
+   Registration name propagated; do not PATCH the Package or repeat the
+   Registration PATCH while waiting.
+8. Persist every observed display name after each GET. Set `nameSyncStatus` to
+   `in-sync` only when every object covered by the assignment policy has the
+   expected name. Any remaining mismatch stays `pending`; an update that cannot
+   safely run is `blocked`.
 
-The rename writes are separate operations, not a transaction. Persist the
-result after each successful PATCH. If only one update succeeds, record
-`rename-partial` and retry only the incomplete PATCH after reading both
-objects again. Do not delete and recreate either object as rename recovery.
+The rename writes are separate operations, not a transaction. A retry reads
+all mapped objects first and PATCHes only names that still differ. Do not
+delete and recreate any object as rename recovery.
 
 Do not change `sourceAgentId`, `originatingStore`, Blueprint IDs, Agent
 Identity IDs, owners, grants, or runtime configuration as part of a display
 name rename.
 
-The intended rename states are:
+The intended name synchronization states are:
 
 ```text
-active
--> rename-observed
--> rename-update-pending
--> rename-partial
--> rename-verified
--> active
+in-sync
+-> pending
+-> in-sync
+
+pending
+-> blocked
+-> pending
+-> in-sync
 ```
 
-`rename-partial` is used only when one of the two independently persisted name
-updates remains incomplete; a fully successful run can move directly from
-`rename-update-pending` to `rename-verified`.
+`pending` covers both a newly detected rename and a partially completed update.
+The per-object display-name fields show exactly which steps remain. `blocked`
+is reserved for a required update that lacks a safe documented operation,
+permission, or approval.
 
 If the provider source ID or native scope changes as well as the display name,
 do not classify the event as a rename. Leave both records
@@ -806,20 +853,23 @@ The current documented write operations are:
 
 | Object | Operation | Expected success |
 | --- | --- | --- |
+| Dedicated Blueprint | [`PATCH /v1.0/applications/{id}/microsoft.graph.agentIdentityBlueprint`](https://learn.microsoft.com/graph/api/agentidentityblueprint-update?view=graph-rest-1.0) with `displayName` | `204 No Content` |
+| Blueprint principal, only when separately approved | [`PATCH /v1.0/servicePrincipals/{id}`](https://learn.microsoft.com/graph/api/serviceprincipal-update?view=graph-rest-1.0) with `@odata.type` and `displayName` | `204 No Content` |
 | Agent Identity | [`PATCH /v1.0/servicePrincipals/{id}/microsoft.graph.agentIdentity`](https://learn.microsoft.com/graph/api/agentidentity-update?view=graph-rest-1.0) with `displayName` | `204 No Content` |
 | Companion Registration | [`PATCH /beta/copilot/agentRegistrations/{id}`](https://learn.microsoft.com/microsoft-365/copilot/extensibility/api/admin-settings/agent-registration/agentregistration-update) with `displayName` and, when applicable, `sourceLastModifiedDateTime` | `200 OK` |
 
-The Registration operation remains a beta interface that Microsoft does not
-support for production applications. Its rename behavior and Package
-propagation must be established in a bounded experiment before automation.
+The Blueprint branding operation has a narrow documented permission. The
+Blueprint principal update uses the general service-principal API and broader
+permission, so it is not silently added to the default path. The Registration
+operation remains a beta interface that Microsoft does not support for
+production applications. Principal behavior and Registration-to-Package name
+propagation must be established in this bounded experiment before automation.
 
 ### Rename flow
 
 Rename locks and verifies the existing source mapping before touching any
-object. In plain English: prove that this is the same provider agent with a
-new name, then rename the two Agent 365-managed objects without replacing
-them. The Blueprint does not change, whether it is dedicated to this one agent
-or shared by several explicitly approved agents.
+object. In plain English: prove that this is the same provider agent, calculate
+the expected names, and update only the names that are out of date.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
@@ -845,40 +895,64 @@ flowchart TB
         A7 -->|Yes| A9
     end
 
-    subgraph GATE["<b>FINAL SAFETY CHECK</b> - nothing is written yet"]
+    subgraph GATE["<b>RECORD THE NAME DIFFERENCE</b> - nothing is written yet"]
         direction TB
-        B1["Read the saved Agent Identity<br/>and companion Registration"]
-        B2{"Is renaming these two<br/>Agent 365 objects approved?"}
-        B3["No: keep both objects unchanged"]
+        B1["Read every mapped object<br/>and save its current display name"]
+        B2["Calculate each expected name<br/>from the provider Package name"]
+        B3{"Are all in-scope names<br/>already correct?"}
+        B4["Keep status in-sync;<br/>no PATCH is needed"]
+        B5["Set status to pending<br/>before the first PATCH"]
         B1 --> B2
-        B2 -->|No| B3
+        B2 --> B3
+        B3 -->|Yes| B4
+        B3 -->|No| B5
     end
 
-    subgraph PART1["<b>PART 1: KEEP THE SAME BLUEPRINT</b>"]
+    subgraph PART1["<b>PART 1: SYNCHRONIZE BLUEPRINT NAMES</b>"]
         direction TB
-        C1["Verify the saved Blueprint and sign-in object<br/><br/>Dedicated example: only this agent uses it<br/>Shared example: other approved agents also use it"]
+        C1{"Dedicated or shared?"}
+        C2["Dedicated: rename the Blueprint<br/>and verify the same IDs"]
+        C3["Read the principal to see<br/>whether its name followed"]
+        C4["Shared: keep the approved<br/>group-level names"]
+        C5{"Principal still has<br/>the old name?"}
+        C6["No: save the observed name"]
+        C7{"Is the broader principal<br/>update separately approved?"}
+        C8["Yes: rename the principal<br/>and verify the same IDs"]
+        C9["No: set status blocked<br/>and stop"]
+        C1 -->|Dedicated| C2
+        C2 --> C3
+        C3 --> C5
+        C5 -->|No| C6
+        C5 -->|Yes| C7
+        C7 -->|Yes| C8
+        C7 -->|No| C9
+        C1 -->|Shared| C4
     end
 
     subgraph PART2["<b>PART 2: RENAME THE AGENT IDENTITY</b>"]
         direction TB
-        D1["Change only the<br/>Agent Identity display name"]
-        D2["Read it again and confirm<br/>the Identity and Blueprint IDs did not change"]
+        D1["Rename only the Agent Identity<br/>when its name is out of date"]
+        D2["Read it again; save the name<br/>and verify the same IDs"]
         D1 --> D2
     end
 
     subgraph PART3["<b>PART 3: RENAME THE COMPANION REGISTRATION</b>"]
         direction TB
-        E1["Change only the Registration display name<br/>and provider modified time"]
-        E2["Read it again and confirm<br/>all saved IDs stayed the same"]
+        E1["Rename only the Registration<br/>and carry the provider modified time"]
+        E2["Read it again; save the name<br/>and verify all IDs stayed the same"]
         E1 --> E2
     end
 
     A9 --> B1
-    B2 -->|Yes| C1
-    C1 --> D1
+    B5 --> C1
+    C4 --> D1
+    C6 --> D1
+    C8 --> D1
     D2 --> E1
-    E2 --> F1["Read inventory again and check<br/>whether the companion Package name followed"]
-    F1 --> F2["Save the final names, unchanged IDs,<br/>and rename result in the mapping"]
+    E2 --> F1["Read the companion Package;<br/>save the name it actually shows"]
+    F1 --> F2{"Do all names covered<br/>by policy now match?"}
+    F2 -->|Yes| F3["Set status to in-sync"]
+    F2 -->|No| F4["Keep status pending;<br/>retry only the remaining names"]
 
     style DETECT fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
     style GATE fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b

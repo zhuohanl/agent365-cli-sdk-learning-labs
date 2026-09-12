@@ -188,8 +188,14 @@ Package, preserves the encoded provider source ID, extracts the required source
 timestamps, and generates the dedicated assignment. After Registration create,
 its `registration` command produces the path-safe ID required for readback.
 Its `finalize` command validates and saves the durable assignment, Blueprint,
-Identity, Registration, Package, and source mapping for the rename and delete
-demos.
+Identity, Registration, Package, source, and initial display-name state for
+the rename and delete demos.
+
+Demo 02 uses `demos/02-rename-companion/prepare_rename.py` after each verified
+GET. The helper preserves every identity relationship, records the Package,
+Blueprint, principal, Identity, Registration, and companion Package display
+names independently, and keeps `nameSyncStatus` pending until every name
+covered by the dedicated or shared assignment policy is synchronized.
 
 The Package List is usually one response. Only when a response contains
 `@odata.nextLink` has Microsoft Graph split the list into multiple pages; save

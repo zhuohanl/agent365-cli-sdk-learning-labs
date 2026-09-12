@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -318,6 +319,37 @@ def mapping_values(
     ):
         raise ValueError("Saved assignment does not match the scoped provider source")
 
+    package_display_name = env["A365_DEMO_TARGET_NAME"]
+    expected_blueprint_name = (
+        f"{package_display_name} - dedicated disposable Blueprint"
+    )
+    expected_identity_name = f"{package_display_name} - managed Agent Identity"
+    expected_companion_name = f"{package_display_name} - managed companion"
+    observed_names = {
+        "blueprintDisplayName": blueprint.get("displayName"),
+        "blueprintPrincipalDisplayName": principal.get("displayName"),
+        "agentIdentityDisplayName": identity.get("displayName"),
+        "companionRegistrationDisplayName": registration.get("displayName"),
+        "companionPackageDisplayName": companion_package.get("displayName"),
+    }
+    expected_names = {
+        "blueprintDisplayName": expected_blueprint_name,
+        "blueprintPrincipalDisplayName": expected_blueprint_name,
+        "agentIdentityDisplayName": expected_identity_name,
+        "companionRegistrationDisplayName": expected_companion_name,
+        "companionPackageDisplayName": expected_companion_name,
+    }
+    missing_names = [
+        key for key, value in observed_names.items()
+        if not isinstance(value, str) or not value
+    ]
+    if missing_names:
+        raise ValueError(
+            "Mapped objects are missing display names: " + ", ".join(missing_names)
+        )
+    if observed_names != expected_names:
+        raise ValueError("Created object display names do not match the naming policy")
+
     return {
         "platform": PLATFORM,
         "assignmentMode": env["A365_DEMO_ASSIGNMENT_MODE"],
@@ -325,7 +357,12 @@ def mapping_values(
         "groupingPolicyVersion": env["A365_DEMO_GROUPING_POLICY_VERSION"],
         "approvalReference": env["A365_DEMO_APPROVAL_REFERENCE"],
         "members": [provider_source],
-        "targetName": env["A365_DEMO_TARGET_NAME"],
+        "packageDisplayName": package_display_name,
+        **observed_names,
+        "status": "active",
+        "nameSyncStatus": "in-sync",
+        "sourceLastModifiedDateTime": env["A365_DEMO_SOURCE_MODIFIED_AT"],
+        "lastObservedAt": datetime.now(timezone.utc).isoformat(),
         "providerSourceAgentId": provider_source,
         "packageId": env["A365_DEMO_ORIGINAL_PACKAGE_ID"],
         "companionSourceAgentId": registration["sourceAgentId"],

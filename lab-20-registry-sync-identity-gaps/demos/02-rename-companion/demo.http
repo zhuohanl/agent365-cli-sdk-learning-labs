@@ -2,17 +2,17 @@
 #
 # Question:
 # When an approved disposable GCP agent is renamed, does Registry Sync retain
-# the exact provider sourceAgentId, and can the existing Agent Identity and
-# companion Registration be renamed in place without replacement objects?
+# the exact provider sourceAgentId, and can every in-scope Agent 365 display
+# name be synchronized without replacing any object or changing any ID?
 #
 # Run one request at a time. Never use "Send All".
 #
 # The evidence path is read-only:
 #   Part 1 -> manually rename the disposable GCP agent -> Part 2 -> Stop A
 #
-# Parts 3 and 4 are optional writes. Do not send them until Stop A confirms
-# that the scoped provider source key is unchanged. A changed sourceAgentId is
-# not an in-place rename.
+# Parts 3 through 6 are one-variable-at-a-time name synchronization writes.
+# Do not send them until Stop A confirms that the scoped provider source key
+# is unchanged. A changed sourceAgentId is not an in-place rename.
 #
 # Put all real values in the shared ignored ../../.env file:
 #
@@ -30,6 +30,7 @@
 # A365_DEMO_COMPANION_SOURCE_AGENT_ID=<exact-mapped-companion-source-id>
 # A365_DEMO_COMPANION_REGISTRATION_ID=<existing-companion-registration-id>
 # A365_DEMO_COMPANION_REGISTRATION_ID_PATH=<path-safe-registration-id>
+# A365_DEMO_COMPANION_PACKAGE_ID=<existing-companion-package-id>
 # A365_RENAME_NEW_TARGET_NAME=<display-name-after-provider-rename>
 # A365_RENAME_AFTER_PACKAGE_ID=<package-id-observed-after-sync>
 # A365_RENAME_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp-after-sync>
@@ -54,11 +55,13 @@
 @companionSourceAgentId = {{$dotenv A365_DEMO_COMPANION_SOURCE_AGENT_ID}}
 @companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
 @companionRegistrationIdPath = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID_PATH}}
+@companionPackageId = {{$dotenv A365_DEMO_COMPANION_PACKAGE_ID}}
 @newTargetName = {{$dotenv A365_RENAME_NEW_TARGET_NAME}}
 @afterPackageId = {{$dotenv A365_RENAME_AFTER_PACKAGE_ID}}
 @newSourceModifiedAt = {{$dotenv A365_RENAME_SOURCE_MODIFIED_AT}}
 @graphBaseUrl = https://graph.microsoft.com
-@renameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@renameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.UpdateBranding.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@principalRenameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FApplication.ReadWrite.All%20offline_access
 
 ###############################################################################
 # Authentication 1 - Request a device code
@@ -320,21 +323,56 @@ Accept: application/json
 # companion Registration and Agent Identity still belong to this source.
 
 ###############################################################################
-# Part 3.1 - OPTIONAL rename of the existing Agent Identity
+# Mapping checkpoint - record the observed provider rename
 #
-# Do not send before Stop A passes.
+# Run from the Lab 20 directory:
 #
-# Expected: 204. This changes display metadata only; the Agent Identity ID and
-# Blueprint relationship remain unchanged.
+# python demos/02-rename-companion/prepare_rename.py
+#
+# This writes mapping-after-rename.json with the observed display name of each
+# object. For the current rename, nameSyncStatus should be pending. Re-run the
+# same command after every verified GET below; it advances to in-sync only
+# when every object covered by the assignment policy has its expected name.
+#
+# The mapping records these independent observations:
+# - packageDisplayName
+# - blueprintDisplayName
+# - blueprintPrincipalDisplayName
+# - agentIdentityDisplayName
+# - companionRegistrationDisplayName
+# - companionPackageDisplayName
+# - nameSyncStatus
 
-# @name renamePatchIdentity
-PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+###############################################################################
+# Part 3 - Synchronize the Blueprint names
+#
+# Dedicated example:
+#   GCP Agent A owns its own Blueprint, so the Blueprint name follows Agent A.
+#
+# Shared example:
+#   Agents A and B use "Support Team Blueprint", so neither agent may rename
+#   the shared Blueprint or principal. Skip Part 3 and continue to Part 4.
+
+###############################################################################
+# Part 3.1 - Rename the dedicated Blueprint
+#
+# Send only when A365_DEMO_ASSIGNMENT_MODE is dedicated and the mapped
+# Blueprint is used only by this provider source. Do not send for shared mode.
+#
+# If Authentication 1 and 2 were completed before this file added
+# AgentIdentityBlueprint.UpdateBranding.All, request a fresh device code and
+# token. Stop rather than approving unexpected tenant-wide consent.
+#
+# Expected: 204. This changes only the Blueprint displayName.
+
+# @name renamePatchBlueprint
+PATCH {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
 
 {
-  "displayName": "{{newTargetName}} - disposable Agent Identity"
+  "displayName": "{{newTargetName}} - dedicated disposable Blueprint"
 }
 
 ###
@@ -343,16 +381,15 @@ Accept: application/json
 # REQUIRED AFTER PART 3.1
 #
 # A successful 204 has no JSON response body. Do not create a fake JSON
-# response file. Continue immediately to Part 3.2, which preserves the
-# verified post-PATCH state.
+# response file. Continue immediately to Part 3.2.
 
 ###############################################################################
-# Part 3.2 - Verify the Agent Identity rename
+# Part 3.2 - Verify the dedicated Blueprint rename
 #
-# Expected: 200 with the same ID and Blueprint appId, and the new displayName.
+# Expected: 200 with the same object ID and appId and the new displayName.
 
-# @name renameGetIdentityAfter
-GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+# @name renameGetBlueprintAfterNameSync
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
@@ -362,20 +399,180 @@ Accept: application/json
 # REQUIRED AFTER PART 3.2
 #
 # Save:
-# ../../evidence/demos/02-rename-companion/agent-identity-after-rename.json
+# ../../evidence/demos/02-rename-companion/blueprint-after-name-sync.json
 #
-# Confirm the ID and Blueprint appId match
-# agent-identity-before-rename.json before continuing.
+# Confirm the object ID and appId match blueprint-before-rename.json. Then run:
+# python demos/02-rename-companion/prepare_rename.py
 
 ###############################################################################
-# Part 3.3 - OPTIONAL rename of the existing companion Registration
+# Part 3.3 - Observe whether the Blueprint principal followed automatically
 #
-# Send only after Part 3.1 returned 204 and Part 3.2 verified the identity.
+# Expected: 200 with the same principal ID and appId. This observation answers
+# whether changing the Blueprint also updates its tenant principal.
+
+# @name renameGetBlueprintPrincipalAfterBlueprint
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.3
+#
+# If the principal already has the new Blueprint name, save:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-after-name-sync.json
+#
+# Then run prepare_rename.py and skip Parts 3.4 through 3.7.
+#
+# If it still has the old name, save instead:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-after-blueprint-rename.json
+# and continue to Stop B.
+
+###############################################################################
+# Stop B - separately approve a Blueprint principal rename
+#
+# The documented general service-principal update requires
+# Application.ReadWrite.All. That broader permission is intentionally absent
+# from the normal rename token.
+#
+# Stop with nameSyncStatus=blocked unless all of the following are true:
+# - the principal did not follow the Blueprint automatically;
+# - the assignment is dedicated;
+# - this exact principal update is explicitly approved;
+# - the public client and operator are already authorized for the broader
+#   permission; and
+# - browser sign-in does not request new tenant consent.
+#
+# Parts 3.4 through 3.7 are an optional bounded experiment, not the default
+# committed-fleet path.
+#
+# When the principal name is required by policy but this branch cannot safely
+# run, record the boundary:
+# python demos/02-rename-companion/prepare_rename.py --blocked
+
+###############################################################################
+# Part 3.4 - OPTIONAL request a separate principal-write device code
+#
+# Never save this response. Stop if sign-in asks for new tenant consent.
+
+# @name renamePrincipalStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{principalRenameScopes}}
+
+###
+
+###############################################################################
+# Part 3.5 - OPTIONAL exchange the principal-write device code
+#
+# Never save this response.
+
+# @name renamePrincipalToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{renamePrincipalStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Part 3.6 - OPTIONAL rename the dedicated Blueprint principal
+#
+# Expected: 204. Change only displayName and identify the derived type.
+
+# @name renamePatchBlueprintPrincipal
+PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{blueprintPrincipalId}}
+Authorization: Bearer {{renamePrincipalToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "@odata.type": "#microsoft.graph.agentIdentityBlueprintPrincipal",
+  "displayName": "{{newTargetName}} - dedicated disposable Blueprint"
+}
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.6
+#
+# A successful 204 has no JSON response body. Do not create a fake JSON
+# response file. Continue immediately to Part 3.7.
+
+###############################################################################
+# Part 3.7 - Verify the Blueprint principal rename
+#
+# Expected: 200 with unchanged ID and appId and the new displayName.
+
+# @name renameGetBlueprintPrincipalAfterNameSync
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.7
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-after-name-sync.json
+#
+# Run:
+# python demos/02-rename-companion/prepare_rename.py
+
+###############################################################################
+# Part 4.1 - Rename the existing Agent Identity
+#
+# Expected: 204. This changes display metadata only; the Identity ID and
+# Blueprint relationship must remain unchanged.
+
+# @name renamePatchIdentity
+PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{newTargetName}} - managed Agent Identity"
+}
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.1
+#
+# A successful 204 has no JSON response body. Do not create a fake JSON file.
+
+###############################################################################
+# Part 4.2 - Verify the Agent Identity rename
+#
+# Expected: 200 with the same ID and Blueprint appId and the new displayName.
+
+# @name renameGetIdentityAfterNameSync
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/agent-identity-after-name-sync.json
+#
+# Confirm the ID and Blueprint appId are unchanged. Then run:
+# python demos/02-rename-companion/prepare_rename.py
+
+###############################################################################
+# Part 5.1 - Rename the existing companion Registration
+#
 # Expected: 200 with an empty response body.
 #
-# Do not PATCH sourceAgentId, originatingStore, Blueprint, identity, or owner
-# fields as part of a display-name rename. Carry the exact newly observed
-# provider source-modified timestamp with the Registration display name.
+# Do not PATCH sourceAgentId, originatingStore, Blueprint, identity, or owner.
+# Carry the exact newly observed provider source-modified timestamp.
 
 # @name renamePatchRegistration
 PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
@@ -392,19 +589,16 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
-# REQUIRED AFTER PART 3.3
+# REQUIRED AFTER PART 5.1
 #
-# A successful 200 has an empty response body. Do not create a fake JSON
-# response file. Continue immediately to Part 3.4, which preserves the
-# verified post-PATCH state.
+# A successful 200 has no JSON response body. Do not create a fake JSON file.
 
 ###############################################################################
-# Part 3.4 - Verify the companion Registration rename
+# Part 5.2 - Verify the companion Registration rename
 #
-# Expected: 200 with the same Registration ID, sourceAgentId, Blueprint ID,
-# Agent Identity ID, owners, and the new displayName.
+# Expected: 200 with unchanged IDs, source, owners, and the new displayName.
 
-# @name renameGetRegistrationAfter
+# @name renameGetRegistrationAfterNameSync
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
@@ -413,19 +607,42 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
-# REQUIRED AFTER PART 3.4
+# REQUIRED AFTER PART 5.2
 #
 # Save:
-# ../../evidence/demos/02-rename-companion/companion-registration-after-rename.json
+# ../../evidence/demos/02-rename-companion/companion-registration-after-name-sync.json
 #
-# Confirm the Registration ID, sourceAgentId, Blueprint ID, Agent Identity ID,
-# and owners match companion-registration-before-rename.json.
+# Confirm every ID and owner matches companion-registration-before-rename.json.
+# Then run:
+# python demos/02-rename-companion/prepare_rename.py
 
 ###############################################################################
-# Part 3.5 - Observe Package propagation after companion rename
+# Part 6.1 - Observe the companion Package name
 #
-# Expected: 200. Do not assume the companion Package display name changes
-# immediately. The original Registry Sync Package remains provider-owned.
+# Expected: 200. The companion Package is an observation, not a PATCH target.
+# Do not assume the Registration name propagates immediately.
+
+# @name renameGetCompanionPackageAfterNameSync
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{companionPackageId}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 6.1
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-package-after-name-sync.json
+#
+# If the old name remains, wait the agreed propagation period and retry only
+# this GET. Do not PATCH the Package and do not repeat the Registration PATCH.
+# Run prepare_rename.py after every saved observation.
+
+###############################################################################
+# Part 6.2 - Refresh inventory after all name updates
+#
+# Expected: 200. This catches a changed Package ID or duplicate record.
 
 # @name renameListPackagesFinal
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
@@ -435,115 +652,26 @@ Accept: application/json
 ###
 
 ###############################################################################
-# REQUIRED AFTER PART 3.5
+# REQUIRED AFTER PART 6.2
 #
 # 1. Save the first page:
-# ../../evidence/demos/02-rename-companion/package-list-after-companion-rename-page-1.json
-# 2. If @odata.nextLink exists, save every additional page as
-#    package-list-after-companion-rename-page-2.json, page-3.json, and so on.
-# 3. Record whether the mapped companion Package name is updated, delayed, or
-#    unchanged. Do not infer the result from the provider Package.
+# ../../evidence/demos/02-rename-companion/package-list-after-name-sync-page-1.json
+# 2. Save every linked page as page-2.json, page-3.json, and so on.
+# 3. Require one provider Package and one companion Package for the mapping.
+# 4. Run:
+# python demos/02-rename-companion/prepare_rename.py
+#
+# The final nameSyncStatus is in-sync only when every in-scope name matches.
+# Any mismatch remains pending. An unavailable or unauthorized required update
+# is blocked. Never delete and recreate an object to repair a display name.
 
 ###############################################################################
-# Rename result checkpoint - no request
+# Cleanup - restore names only after restoring the provider name
 #
-# Preserve in the durable mapping:
-# - unchanged scoped provider source key
-# - before and after Package IDs
-# - before and after source display names
-# - unchanged assignment mode, Blueprint group, Blueprint, companion
-#   Registration, and Agent Identity IDs
-# - result of each PATCH and GET
-# - whether companion Package propagation was immediate, delayed, or absent
-#
-# If one PATCH succeeds and the other fails, record rename-partial. Read both
-# objects before retrying only the incomplete PATCH. Never delete and recreate
-# either object as rename recovery.
-
-###############################################################################
-# Part 4.1 - OPTIONAL rollback of Agent Identity display name
-#
-# Run only if the provider agent has first been renamed back through its
-# supported interface and Registry Sync has confirmed the original scoped
-# source key. Expected: 204.
-
-# @name renameRollbackIdentity
-PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{renameToken.response.body.$.access_token}}
-Content-Type: application/json
-Accept: application/json
-
-{
-  "displayName": "{{oldTargetName}} - disposable Agent Identity"
-}
-
-###
-
-###############################################################################
-# REQUIRED AFTER PART 4.1
-#
-# A successful 204 has no JSON response body. Do not create a fake JSON
-# response file. Verify the rollback with Part 4.2.
-
-###############################################################################
-# Part 4.2 - Verify the Agent Identity rollback
-#
-# Expected: 200 with the original displayName and unchanged ID and Blueprint.
-
-# @name renameGetIdentityAfterRollback
-GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{renameToken.response.body.$.access_token}}
-Accept: application/json
-
-###
-
-###############################################################################
-# REQUIRED AFTER PART 4.2
-#
-# Save:
-# ../../evidence/demos/02-rename-companion/agent-identity-after-rollback.json
-
-###############################################################################
-# Part 4.3 - OPTIONAL rollback of companion Registration display name
-#
-# Run only after Part 4.2 verifies the Identity rollback. Expected: 200 with
-# an empty response body.
-
-# @name renameRollbackRegistration
-PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
-Authorization: Bearer {{renameToken.response.body.$.access_token}}
-Content-Type: application/json
-Accept: application/json
-OData-Version: 4.0
-
-{
-  "displayName": "{{oldTargetName}} - managed companion"
-}
-
-###
-
-###############################################################################
-# REQUIRED AFTER PART 4.3
-#
-# A successful 200 has an empty response body. Do not create a fake JSON
-# response file. Verify the rollback with Part 4.4.
-
-###############################################################################
-# Part 4.4 - Verify the companion Registration rollback
-#
-# Expected: 200 with the original displayName and unchanged Registration,
-# source, Blueprint, Agent Identity, and owner fields.
-
-# @name renameGetRegistrationAfterRollback
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
-Authorization: Bearer {{renameToken.response.body.$.access_token}}
-Accept: application/json
-OData-Version: 4.0
-
-###
-
-###############################################################################
-# REQUIRED AFTER PART 4.4
-#
-# Save:
-# ../../evidence/demos/02-rename-companion/companion-registration-after-rollback.json
+# To return the disposable experiment to its original names:
+# 1. Rename the provider agent back through its supported provider interface.
+# 2. Wait for healthy Registry Sync and prove the stable source key again.
+# 3. Set A365_RENAME_NEW_TARGET_NAME to the original oldTargetName value.
+# 4. Repeat Parts 3 through 6.
+# 5. For shared mode, continue to skip Blueprint and principal rename.
+# 6. Preserve the final rollback evidence and mapping; do not erase history.

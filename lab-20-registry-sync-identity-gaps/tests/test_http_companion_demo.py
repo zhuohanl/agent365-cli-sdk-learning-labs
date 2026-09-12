@@ -811,15 +811,19 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             "renameGetRegistrationBefore",
             "renameListPackagesAfter",
             "renameGetPackageAfter",
+            "renamePatchBlueprint",
+            "renameGetBlueprintAfterNameSync",
+            "renameGetBlueprintPrincipalAfterBlueprint",
+            "renamePrincipalStartDeviceCode",
+            "renamePrincipalToken",
+            "renamePatchBlueprintPrincipal",
+            "renameGetBlueprintPrincipalAfterNameSync",
             "renamePatchIdentity",
-            "renameGetIdentityAfter",
+            "renameGetIdentityAfterNameSync",
             "renamePatchRegistration",
-            "renameGetRegistrationAfter",
+            "renameGetRegistrationAfterNameSync",
+            "renameGetCompanionPackageAfterNameSync",
             "renameListPackagesFinal",
-            "renameRollbackIdentity",
-            "renameGetIdentityAfterRollback",
-            "renameRollbackRegistration",
-            "renameGetRegistrationAfterRollback",
         ]
         self.assertEqual(names, expected)
 
@@ -833,10 +837,10 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
 
     def test_rename_preserves_identity_fields(self):
         for name in (
+            "renamePatchBlueprint",
+            "renamePatchBlueprintPrincipal",
             "renamePatchIdentity",
             "renamePatchRegistration",
-            "renameRollbackIdentity",
-            "renameRollbackRegistration",
         ):
             block = self.blocks[name]
             self.assertIn('"displayName":', block)
@@ -854,9 +858,7 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
         for name in (
             "renameGetRegistrationBefore",
             "renamePatchRegistration",
-            "renameGetRegistrationAfter",
-            "renameRollbackRegistration",
-            "renameGetRegistrationAfterRollback",
+            "renameGetRegistrationAfterNameSync",
         ):
             self.assertIn("{{companionRegistrationIdPath}}", self.blocks[name])
 
@@ -891,22 +893,33 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
                 "renameGetPackageAfter",
                 "provider-package-after-rename.json",
             ),
-            ("renameGetIdentityAfter", "agent-identity-after-rename.json"),
             (
-                "renameGetRegistrationAfter",
-                "companion-registration-after-rename.json",
+                "renameGetBlueprintAfterNameSync",
+                "blueprint-after-name-sync.json",
+            ),
+            (
+                "renameGetBlueprintPrincipalAfterBlueprint",
+                "blueprint-principal-after-name-sync.json",
+            ),
+            (
+                "renameGetBlueprintPrincipalAfterNameSync",
+                "blueprint-principal-after-name-sync.json",
+            ),
+            (
+                "renameGetIdentityAfterNameSync",
+                "agent-identity-after-name-sync.json",
+            ),
+            (
+                "renameGetRegistrationAfterNameSync",
+                "companion-registration-after-name-sync.json",
+            ),
+            (
+                "renameGetCompanionPackageAfterNameSync",
+                "companion-package-after-name-sync.json",
             ),
             (
                 "renameListPackagesFinal",
-                "package-list-after-companion-rename-page-1.json",
-            ),
-            (
-                "renameGetIdentityAfterRollback",
-                "agent-identity-after-rollback.json",
-            ),
-            (
-                "renameGetRegistrationAfterRollback",
-                "companion-registration-after-rollback.json",
+                "package-list-after-name-sync-page-1.json",
             ),
         ]
         names = list(self.blocks)
@@ -925,10 +938,10 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
 
     def test_empty_patch_responses_use_verified_get_instead_of_fake_json(self):
         for name in (
+            "renamePatchBlueprint",
+            "renamePatchBlueprintPrincipal",
             "renamePatchIdentity",
             "renamePatchRegistration",
-            "renameRollbackIdentity",
-            "renameRollbackRegistration",
         ):
             with self.subTest(request=name):
                 start = self.text.index(f"# @name {name}")
@@ -945,13 +958,80 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
 
     def test_graph_requests_use_explicit_rename_token(self):
         for name, block in self.blocks.items():
-            if name in {"renameStartDeviceCode", "renameToken"}:
+            if name in {
+                "renameStartDeviceCode",
+                "renameToken",
+                "renamePrincipalStartDeviceCode",
+                "renamePrincipalToken",
+                "renamePatchBlueprintPrincipal",
+            }:
                 continue
             self.assertIn(
                 "Authorization: Bearer "
                 "{{renameToken.response.body.$.access_token}}",
                 block,
             )
+        self.assertIn(
+            "Authorization: Bearer "
+            "{{renamePrincipalToken.response.body.$.access_token}}",
+            self.blocks["renamePatchBlueprintPrincipal"],
+        )
+
+    def test_rename_records_all_display_names_and_refreshes_mapping(self):
+        for field in (
+            "packageDisplayName",
+            "blueprintDisplayName",
+            "blueprintPrincipalDisplayName",
+            "agentIdentityDisplayName",
+            "companionRegistrationDisplayName",
+            "companionPackageDisplayName",
+            "nameSyncStatus",
+        ):
+            self.assertIn(field, self.text)
+        self.assertGreaterEqual(
+            self.text.count(
+                "python demos/02-rename-companion/prepare_rename.py"
+            ),
+            6,
+        )
+        self.assertIn("nameSyncStatus should be pending", self.text)
+        self.assertIn("every in-scope name matches", self.text)
+
+    def test_dedicated_blueprint_renames_but_shared_blueprint_does_not(self):
+        self.assertIn("Dedicated example:", self.text)
+        self.assertIn("Shared example:", self.text)
+        self.assertIn("Skip Part 3 and continue to Part 4", self.text)
+        blueprint = self.blocks["renamePatchBlueprint"]
+        self.assertIn(
+            "/applications/{{blueprintObjectId}}/"
+            "microsoft.graph.agentIdentityBlueprint",
+            blueprint,
+        )
+        self.assertIn(
+            '"displayName": "{{newTargetName}} - dedicated disposable Blueprint"',
+            blueprint,
+        )
+
+    def test_principal_update_is_separate_and_does_not_expand_default_scope(self):
+        self.assertIn("AgentIdentityBlueprint.UpdateBranding.All", self.text)
+        rename_scope_line = next(
+            line for line in self.text.splitlines()
+            if line.startswith("@renameScopes =")
+        )
+        self.assertNotIn("Application.ReadWrite.All", rename_scope_line)
+        self.assertIn(
+            "@principalRenameScopes = "
+            "https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20"
+            "https%3A%2F%2Fgraph.microsoft.com%2FApplication.ReadWrite.All",
+            self.text,
+        )
+        principal_patch = self.blocks["renamePatchBlueprintPrincipal"]
+        self.assertIn(
+            '"@odata.type": '
+            '"#microsoft.graph.agentIdentityBlueprintPrincipal"',
+            principal_patch,
+        )
+        self.assertIn("Stop if sign-in asks for new tenant consent", self.text)
 
     def test_rename_file_contains_no_literal_credentials(self):
         self.assertIn(

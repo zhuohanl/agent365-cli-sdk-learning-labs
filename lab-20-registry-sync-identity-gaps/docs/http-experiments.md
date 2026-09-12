@@ -77,7 +77,14 @@ and companion Packages.
 The `demos/01-add-companion/prepare_demo.py` helper derives Package and source
 values from saved read-only responses, generates the dedicated assignment, and
 encodes the returned Registration ID for URL-path use. After the creates, it
-saves the ignored durable mapping and generated IDs used by demos 02 and 03.
+saves the ignored durable mapping, generated IDs, and initial display-name
+state used by demos 02 and 03.
+
+Demo 02 treats the provider-owned Package display name as the source for name
+synchronization. Its `prepare_rename.py` helper records each mapped object's
+observed name and keeps the result pending until every in-scope name matches
+policy. Dedicated Blueprint names follow the provider agent; shared Blueprint
+and principal names remain group-level names.
 It never obtains a token, calls Microsoft Graph, or prints identifiers.
 
 Each lifecycle demo starts with the explicit two-request authentication used
