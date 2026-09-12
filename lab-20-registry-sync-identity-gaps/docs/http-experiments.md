@@ -51,24 +51,28 @@ Delete is last because it removes the Registration required by the rename
 demo. Each demo remains gated and can instead use a different explicitly
 approved disposable agent selected through `.env`.
 
-Before demo 01, provide the exact GCP Package display name and the approved
-Blueprint group:
+Before demo 01, provide the exact GCP Package display name and the standing
+dedicated-onboarding policy metadata:
 
 ```dotenv
 A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
-A365_DEMO_BLUEPRINT_GROUP=<approved-blueprint-group-label>
+A365_DEMO_GROUPING_POLICY_VERSION=<approved-standing-policy-version>
+A365_DEMO_APPROVAL_REFERENCE=<approved-standing-policy-reference>
 ```
 
-Set `A365_DEMO_BLUEPRINT_OBJECT_ID` only when protected local mapping identifies
-an approved reusable Blueprint. Otherwise leave it empty. Demo 01 performs
-inventory discovery first, then Part 1 either verifies the recorded Blueprint
-or creates one behind a separate approval gate. Its `blueprint` helper command
-normalizes either result into generated object and app IDs before Parts 2 and 3.
+After Package discovery, the helper generates a deterministic dedicated
+assignment and `A365_DEMO_BLUEPRINT_GROUP`. Reconcile that exact group against
+protected local mapping. Set `A365_DEMO_BLUEPRINT_OBJECT_ID` only when the
+mapping identifies its existing Blueprint; otherwise leave it empty. Demo 01
+then follows the Experiment 03 order: Blueprint and principal, Agent Identity,
+companion Registration, Registration readback, and independent reads of the
+original and companion Packages.
 
 The `demos/01-add-companion/prepare_demo.py` helper derives Package and source
-values from saved read-only responses. After the creates, it saves the ignored
-durable mapping and generated IDs used by demos 02 and 03. It never obtains a
-token, calls Microsoft Graph, or prints identifiers.
+values from saved read-only responses, generates the dedicated assignment, and
+encodes the returned Registration ID for URL-path use. After the creates, it
+saves the ignored durable mapping and generated IDs used by demos 02 and 03.
+It never obtains a token, calls Microsoft Graph, or prints identifiers.
 
 Each lifecycle demo starts with the explicit two-request authentication used
 by Experiment 1: request a device code, complete browser sign-in, and exchange

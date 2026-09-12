@@ -17,24 +17,36 @@
 # A365_CLIENT_ID=<public-client-application-id>
 # A365_DEMO_ORIGINAL_PACKAGE_ID=<registry-sync-package-id>
 # A365_DEMO_PROVIDER_SOURCE_AGENT_ID=<exact-provider-source-agent-id>
-# A365_DEMO_BLUEPRINT_APP_ID=<platform-blueprint-app-id>
+# A365_DEMO_ASSIGNMENT_MODE=<dedicated-or-shared>
+# A365_DEMO_BLUEPRINT_GROUP=<mapped-assignment-group>
+# A365_DEMO_BLUEPRINT_OBJECT_ID=<mapped-blueprint-object-id>
+# A365_DEMO_BLUEPRINT_APP_ID=<mapped-blueprint-app-id>
+# A365_DEMO_BLUEPRINT_PRINCIPAL_ID=<mapped-blueprint-principal-id>
 # A365_DEMO_AGENT_IDENTITY_ID=<dedicated-agent-identity-id>
+# A365_DEMO_COMPANION_SOURCE_AGENT_ID=<exact-mapped-companion-source-id>
 # A365_DEMO_COMPANION_REGISTRATION_ID=<companion-registration-id>
+# A365_DEMO_COMPANION_REGISTRATION_ID_PATH=<path-safe-registration-id>
 #
 # Save private responses only under:
 # ../../evidence/demos/03-delete-companion/
 #
-# This file never deletes the platform Blueprint or Registry Sync connection.
+# This file never deletes the mapped Blueprint or Registry Sync connection.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
 @originalPackageId = {{$dotenv A365_DEMO_ORIGINAL_PACKAGE_ID}}
 @expectedSourceAgentId = {{$dotenv A365_DEMO_PROVIDER_SOURCE_AGENT_ID}}
+@assignmentMode = {{$dotenv A365_DEMO_ASSIGNMENT_MODE}}
+@blueprintGroup = {{$dotenv A365_DEMO_BLUEPRINT_GROUP}}
+@blueprintObjectId = {{$dotenv A365_DEMO_BLUEPRINT_OBJECT_ID}}
 @blueprintAppId = {{$dotenv A365_DEMO_BLUEPRINT_APP_ID}}
+@blueprintPrincipalId = {{$dotenv A365_DEMO_BLUEPRINT_PRINCIPAL_ID}}
 @agentIdentityId = {{$dotenv A365_DEMO_AGENT_IDENTITY_ID}}
+@companionSourceAgentId = {{$dotenv A365_DEMO_COMPANION_SOURCE_AGENT_ID}}
 @companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
+@companionRegistrationIdPath = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID_PATH}}
 @graphBaseUrl = https://graph.microsoft.com
-@deleteScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FApplication.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.DeleteRestore.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@deleteScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FApplication.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.DeleteRestore.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
 
 ###############################################################################
 # Authentication 1 - Request a device code
@@ -101,18 +113,42 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 1.4 - Capture the mapped companion Registration
+# Part 1.4 - Verify the mapped Blueprint
+#
+# Expected: 200. Confirm its object ID and appId match the locked assignment.
+
+# @name deleteGetBlueprintBefore
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.5 - Verify the enabled Blueprint principal
+#
+# Expected: 200. Confirm id equals A365_DEMO_BLUEPRINT_PRINCIPAL_ID, appId
+# equals A365_DEMO_BLUEPRINT_APP_ID, and accountEnabled is not false.
+
+# @name deleteGetBlueprintPrincipalBefore
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.6 - Capture the mapped companion Registration
 #
 # Expected: 200.
 # Confirm:
 # - ID equals A365_DEMO_COMPANION_REGISTRATION_ID
-# - sourceAgentId equals the legacy value created by the earlier experiment:
-#   committed-fleet:companion:v1:gcp:<exact-provider-source-id>
-# - do not delete solely to replace that legacy namespace
+# - sourceAgentId equals A365_DEMO_COMPANION_SOURCE_AGENT_ID exactly
+# - do not delete solely to replace a valid legacy source namespace
 # - Blueprint and Agent Identity links match the durable mapping
 
 # @name deleteGetRegistrationBefore
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
@@ -120,7 +156,7 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
-# Part 1.5 - Capture the mapped Agent Identity
+# Part 1.7 - Capture the mapped Agent Identity
 #
 # Expected: 200. Confirm the ID and Blueprint appId match the mapping.
 
@@ -132,7 +168,7 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 1.6 - OPTIONAL inspect direct app-role assignments
+# Part 1.8 - OPTIONAL inspect direct app-role assignments
 #
 # This documented service-principal relationship requires the separately
 # consented Application.Read.All permission. Do not request broader permission
@@ -150,7 +186,7 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 1.7 - Inspect direct directory memberships
+# Part 1.9 - Inspect direct directory memberships
 #
 # Expected: 200. Record only safe counts/classifications in tracked evidence.
 
@@ -232,7 +268,7 @@ Accept: application/json
 # Expected: 204.
 
 # @name deleteCompanionRegistration
-DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
@@ -246,7 +282,7 @@ OData-Version: 4.0
 # Expected: 404.
 
 # @name deleteGetRegistrationAfter
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
@@ -290,7 +326,8 @@ Accept: application/json
 #   workflow, or other consumer still requires it; and
 # - Agent Identity retirement approval has been recorded.
 #
-# Keep the platform Blueprint. Do not delete it as per-agent cleanup.
+# Keep the mapped Blueprint. Even a dedicated Blueprint has a separate
+# retirement lifecycle and is not deleted by this per-agent cleanup step.
 
 ###############################################################################
 # Part 4.1 - OPTIONAL Agent Identity soft deletion
@@ -333,5 +370,5 @@ Accept: application/json
 # - final status and any partial or inconclusive result
 #
 # Do not erase the mapping. It prevents stale inventory from silently creating
-# a replacement companion. Do not delete the shared platform Blueprint,
+# a replacement companion. Do not delete the mapped Blueprint,
 # Registry Sync connection, provider credentials, or unrelated local evidence.

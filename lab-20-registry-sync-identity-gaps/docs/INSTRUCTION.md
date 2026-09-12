@@ -154,39 +154,43 @@ The repository ignores `.env`. Never put real values into
 the tracked files under `experiments/` or `demos/`,
 tracked Markdown, chat, an issue, or a screenshot.
 
-The add-companion demo requires two demo-specific decisions before it starts:
+The add-companion demo requires the selected source and the standing
+dedicated-onboarding policy metadata before it starts:
 
 ```dotenv
 A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
-A365_DEMO_BLUEPRINT_GROUP=<approved-blueprint-group-label>
+A365_DEMO_GROUPING_POLICY_VERSION=<approved-standing-policy-version>
+A365_DEMO_APPROVAL_REFERENCE=<approved-standing-policy-reference>
 ```
 
-The target name is the operator's inventory selection. The Blueprint group is
-the approved credential and governance boundary for the selected source; a
-Registry Sync Package does not carry this relationship, so the demo cannot
-infer it.
+The target name is the operator's inventory selection. After reading Package
+Details, the helper generates a deterministic single-member Blueprint group
+from the tenant, platform, and exact provider source key. It does not infer a
+shared group from provider metadata or the Package display name.
 
 Before starting the Add demo, choose the target GCP agent and put its exact
 Package `displayName` in `A365_DEMO_TARGET_NAME` in the ignored Lab 20 `.env`.
-Copy spaces and capitalization exactly. Put the approved Blueprint group label
-in `A365_DEMO_BLUEPRINT_GROUP`.
+Copy spaces and capitalization exactly. Record the standing policy version and
+approval reference that authorize dedicated onboarding.
 
-`A365_DEMO_BLUEPRINT_OBJECT_ID` is optional at the start. Set it only when
-protected local mapping identifies an approved reusable Blueprint for the
-selected group. Otherwise leave it empty. After inventory discovery,
-Part 1 provides separate reuse and approved-creation branches, resolves either
-result through `prepare_demo.py blueprint`, and verifies the Blueprint
-principal before any per-agent object is created.
+After the helper generates `A365_DEMO_BLUEPRINT_GROUP`, reconcile that exact
+assignment against protected local mapping. Set
+`A365_DEMO_BLUEPRINT_OBJECT_ID` only when the mapping identifies the Blueprint
+already bound to that group. Otherwise leave it empty. Part 1 then provides
+separate reuse and approved-creation branches, resolves either result through
+`prepare_demo.py blueprint`, and verifies the Blueprint principal before any
+per-agent object is created.
 
 Follow
 [`demos/01-add-companion/demo.http`](../demos/01-add-companion/demo.http) and use
 its `prepare_demo.py` helper after saving the Package List and Package Details
 responses under ignored evidence. The helper selects exactly one matching GCP
 Package, preserves the encoded provider source ID, extracts the required source
-timestamps, and writes only generated values to the ignored `.env`. After the
-two approved creates, its `finalize` command validates and saves the durable
-Blueprint, Identity, Registration, Package, and source mapping for the rename
-and delete demos.
+timestamps, and generates the dedicated assignment. After Registration create,
+its `registration` command produces the path-safe ID required for readback.
+Its `finalize` command validates and saves the durable assignment, Blueprint,
+Identity, Registration, Package, and source mapping for the rename and delete
+demos.
 
 The Package List is usually one response. Only when a response contains
 `@odata.nextLink` has Microsoft Graph split the list into multiple pages; save

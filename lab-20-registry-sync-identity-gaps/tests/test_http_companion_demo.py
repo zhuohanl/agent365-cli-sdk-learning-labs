@@ -433,7 +433,9 @@ class HttpCompanionDemoTests(unittest.TestCase):
             "demoGetNewAgentIdentity",
             "demoCreateFreshCompanion",
             "demoGetNewCompanion",
+            "demoListPackagesAfter",
             "demoGetOriginalPackageAfter",
+            "demoGetCompanionPackageAfter",
         ]
         self.assertEqual(names, expected)
 
@@ -455,12 +457,15 @@ class HttpCompanionDemoTests(unittest.TestCase):
         )
         self.assertIn('"createdBy": "{{demoCurrentUser.response.body.$.id}}"', self.text)
 
-    def test_requires_target_and_group_with_optional_reuse_id(self):
+    def test_requires_target_and_policy_then_generates_assignment(self):
         header = self.text[: self.text.index("@tenantId")]
         self.assertIn("A365_DEMO_TARGET_NAME=", header)
-        self.assertIn("A365_DEMO_BLUEPRINT_GROUP=", header)
-        self.assertIn("A365_DEMO_BLUEPRINT_OBJECT_ID is optional", header)
+        self.assertIn("A365_DEMO_GROUPING_POLICY_VERSION=", header)
+        self.assertIn("A365_DEMO_APPROVAL_REFERENCE=", header)
+        self.assertIn("helper generates a deterministic dedicated", header)
         for generated in (
+            "A365_DEMO_ASSIGNMENT_MODE=",
+            "A365_DEMO_BLUEPRINT_GROUP=",
             "A365_DEMO_ORIGINAL_PACKAGE_ID=",
             "A365_DEMO_PROVIDER_SOURCE_AGENT_ID=",
             "A365_DEMO_SOURCE_CREATED_AT=",
@@ -482,7 +487,7 @@ class HttpCompanionDemoTests(unittest.TestCase):
     def test_blueprint_reuse_or_create_is_resolved_before_identity(self):
         reuse = self.text.index("# @name demoGetExistingBlueprint")
         blueprint_stop = self.text.index(
-            "# Stop 1A - Approve creation of one group Blueprint"
+            "# Stop 1A - Approve creation of the dedicated assignment Blueprint"
         )
         blueprint_post = self.text.index("# @name demoCreateBlueprint")
         helper = self.text.index("prepare_demo.py blueprint")
@@ -496,8 +501,7 @@ class HttpCompanionDemoTests(unittest.TestCase):
 
         create = named_blocks(self.text)["demoCreateBlueprint"]
         self.assertIn(
-            '"displayName": "GoogleVertexAI - {{blueprintGroup}} '
-            '- disposable Blueprint"',
+            '"displayName": "{{targetName}} - dedicated disposable Blueprint"',
             create,
         )
         self.assertIn('"sponsors@odata.bind":', create)
@@ -539,15 +543,29 @@ class HttpCompanionDemoTests(unittest.TestCase):
         self.assertIn('Never use "Send All".', self.text)
 
     def test_finalize_persists_generated_ids(self):
+        self.assertIn("prepare_demo.py registration", self.text)
         self.assertIn("prepare_demo.py finalize", self.text)
         self.assertIn("mapping.json", self.text)
         for generated in (
+            "A365_DEMO_ASSIGNMENT_MODE",
+            "A365_DEMO_BLUEPRINT_GROUP",
             "A365_DEMO_BLUEPRINT_OBJECT_ID",
             "A365_DEMO_BLUEPRINT_APP_ID",
+            "A365_DEMO_BLUEPRINT_PRINCIPAL_ID",
             "A365_DEMO_AGENT_IDENTITY_ID",
+            "A365_DEMO_COMPANION_SOURCE_AGENT_ID",
             "A365_DEMO_COMPANION_REGISTRATION_ID",
+            "A365_DEMO_COMPANION_REGISTRATION_ID_PATH",
         ):
             self.assertIn(generated, self.text)
+
+    def test_registration_readback_and_package_comparison_match_experiment_three(self):
+        readback = named_blocks(self.text)["demoGetNewCompanion"]
+        self.assertIn("{{companionRegistrationIdPath}}", readback)
+        self.assertNotIn("demoCreateFreshCompanion.response.body.$.id", readback)
+        self.assertIn("demoListPackagesAfter", named_blocks(self.text))
+        self.assertIn("demoGetOriginalPackageAfter", named_blocks(self.text))
+        self.assertIn("demoGetCompanionPackageAfter", named_blocks(self.text))
 
 
 class HttpCompanionRenameDemoTests(unittest.TestCase):
@@ -564,6 +582,8 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             "renameCurrentUser",
             "renameListPackagesBefore",
             "renameGetPackageBefore",
+            "renameGetBlueprintBefore",
+            "renameGetBlueprintPrincipalBefore",
             "renameGetIdentityBefore",
             "renameGetRegistrationBefore",
             "renameListPackagesAfter",
@@ -598,6 +618,21 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             self.assertNotIn('"sourceAgentId":', block)
             self.assertNotIn('"agentIdentityId":', block)
             self.assertNotIn('"agentIdentityBlueprintId":', block)
+
+    def test_rename_uses_locked_assignment_and_path_safe_registration_id(self):
+        self.assertIn("A365_DEMO_ASSIGNMENT_MODE=", self.text)
+        self.assertIn("A365_DEMO_BLUEPRINT_GROUP=", self.text)
+        self.assertIn("A365_DEMO_BLUEPRINT_OBJECT_ID=", self.text)
+        self.assertIn("A365_DEMO_BLUEPRINT_PRINCIPAL_ID=", self.text)
+        self.assertIn("A365_DEMO_COMPANION_SOURCE_AGENT_ID=", self.text)
+        self.assertIn("A365_DEMO_COMPANION_REGISTRATION_ID_PATH=", self.text)
+        for name in (
+            "renameGetRegistrationBefore",
+            "renamePatchRegistration",
+            "renameGetRegistrationAfter",
+            "renameRollbackRegistration",
+        ):
+            self.assertIn("{{companionRegistrationIdPath}}", self.blocks[name])
 
     def test_graph_requests_use_explicit_rename_token(self):
         for name, block in self.blocks.items():
@@ -635,6 +670,8 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
             "deleteCurrentUser",
             "deleteListPackagesBefore",
             "deleteGetOriginalPackageBefore",
+            "deleteGetBlueprintBefore",
+            "deleteGetBlueprintPrincipalBefore",
             "deleteGetRegistrationBefore",
             "deleteGetIdentityBefore",
             "deleteGetIdentityAppRoleAssignments",
@@ -678,9 +715,23 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
             self.text,
             r"(?m)^DELETE .*agentIdentityBlueprint",
         )
-        self.assertIn("This file never deletes the platform Blueprint", self.text)
+        self.assertIn("This file never deletes the mapped Blueprint", self.text)
         self.assertIn("Do not erase the mapping.", self.text)
         self.assertIn("Agent Identity deletion is soft deletion", self.text)
+
+    def test_delete_uses_locked_assignment_and_path_safe_registration_id(self):
+        self.assertIn("A365_DEMO_ASSIGNMENT_MODE=", self.text)
+        self.assertIn("A365_DEMO_BLUEPRINT_GROUP=", self.text)
+        self.assertIn("A365_DEMO_BLUEPRINT_OBJECT_ID=", self.text)
+        self.assertIn("A365_DEMO_BLUEPRINT_PRINCIPAL_ID=", self.text)
+        self.assertIn("A365_DEMO_COMPANION_SOURCE_AGENT_ID=", self.text)
+        self.assertIn("A365_DEMO_COMPANION_REGISTRATION_ID_PATH=", self.text)
+        for name in (
+            "deleteGetRegistrationBefore",
+            "deleteCompanionRegistration",
+            "deleteGetRegistrationAfter",
+        ):
+            self.assertIn("{{companionRegistrationIdPath}}", self.blocks[name])
 
     def test_delete_file_contains_no_literal_credentials(self):
         self.assertIn(

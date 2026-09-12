@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
 from typing import Any
+from urllib.parse import quote
 
 
 LAB = Path(__file__).resolve().parents[2]
@@ -16,6 +18,7 @@ DEFAULT_ENV = LAB / ".env"
 DEFAULT_EVIDENCE = LAB / "evidence" / "demos" / "01-add-companion"
 PLATFORM = "GoogleVertexAI"
 COMPANION_PREFIX = "agent-governance:companion:v1:gcp:"
+ASSIGNMENT_MODE = "dedicated"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -164,6 +167,29 @@ def source_values(package: dict[str, Any], target_name: str) -> dict[str, str]:
     return values
 
 
+def assignment_values(env: dict[str, str], provider_source: str) -> dict[str, str]:
+    tenant_id = env.get("A365_TENANT_ID", "")
+    policy_version = env.get("A365_DEMO_GROUPING_POLICY_VERSION", "")
+    approval_reference = env.get("A365_DEMO_APPROVAL_REFERENCE", "")
+    if not tenant_id:
+        raise ValueError("Set A365_TENANT_ID before preparing the assignment")
+    if not policy_version:
+        raise ValueError(
+            "Set A365_DEMO_GROUPING_POLICY_VERSION before preparing the assignment"
+        )
+    if not approval_reference:
+        raise ValueError(
+            "Set A365_DEMO_APPROVAL_REFERENCE before preparing the assignment"
+        )
+
+    canonical_key = f"{tenant_id}|{PLATFORM}|{provider_source}"
+    digest = hashlib.sha256(canonical_key.encode("utf-8")).hexdigest()[:16]
+    return {
+        "A365_DEMO_ASSIGNMENT_MODE": ASSIGNMENT_MODE,
+        "A365_DEMO_BLUEPRINT_GROUP": f"dedicated-gcp-{digest}",
+    }
+
+
 def blueprint_values(
     blueprint: dict[str, Any], existing_object_id: str = ""
 ) -> dict[str, str]:
@@ -183,6 +209,22 @@ def blueprint_values(
     }
 
 
+def registration_values(registration: dict[str, Any]) -> dict[str, str]:
+    registration_id = registration.get("id")
+    source_agent_id = registration.get("sourceAgentId")
+    if not isinstance(registration_id, str) or not registration_id:
+        raise ValueError("Registration response has no id")
+    if not isinstance(source_agent_id, str) or not source_agent_id:
+        raise ValueError("Registration response has no sourceAgentId")
+    return {
+        "A365_DEMO_COMPANION_SOURCE_AGENT_ID": source_agent_id,
+        "A365_DEMO_COMPANION_REGISTRATION_ID": registration_id,
+        "A365_DEMO_COMPANION_REGISTRATION_ID_PATH": quote(
+            registration_id, safe=""
+        ),
+    }
+
+
 def mapping_values(
     env: dict[str, str],
     blueprint: dict[str, Any],
@@ -196,6 +238,7 @@ def mapping_values(
     identity_id = identity.get("id")
     registration_id = registration.get("id")
     provider_source = env.get("A365_DEMO_PROVIDER_SOURCE_AGENT_ID", "")
+    expected_assignment = assignment_values(env, provider_source)
 
     if (
         blueprint.get("id") != blueprint_object_id
@@ -226,10 +269,21 @@ def mapping_values(
         or registration.get("agentIdentityId") != identity_id
     ):
         raise ValueError("Registration identity links do not match the created objects")
+    if (
+        env.get("A365_DEMO_ASSIGNMENT_MODE")
+        != expected_assignment["A365_DEMO_ASSIGNMENT_MODE"]
+        or env.get("A365_DEMO_BLUEPRINT_GROUP")
+        != expected_assignment["A365_DEMO_BLUEPRINT_GROUP"]
+    ):
+        raise ValueError("Saved assignment does not match the scoped provider source")
 
     return {
         "platform": PLATFORM,
+        "assignmentMode": env["A365_DEMO_ASSIGNMENT_MODE"],
         "blueprintGroup": env["A365_DEMO_BLUEPRINT_GROUP"],
+        "groupingPolicyVersion": env["A365_DEMO_GROUPING_POLICY_VERSION"],
+        "approvalReference": env["A365_DEMO_APPROVAL_REFERENCE"],
+        "members": [provider_source],
         "targetName": env["A365_DEMO_TARGET_NAME"],
         "providerSourceAgentId": provider_source,
         "packageId": env["A365_DEMO_ORIGINAL_PACKAGE_ID"],
@@ -264,17 +318,29 @@ def prepare_command(args: argparse.Namespace) -> None:
     if not target_name:
         raise ValueError("Set A365_DEMO_TARGET_NAME before running prepare")
     updates = source_values(load_json(args.package_details), target_name)
+    updates.update(
+        assignment_values(env, updates["A365_DEMO_PROVIDER_SOURCE_AGENT_ID"])
+    )
     update_env(args.env, updates)
     print(
-        "Updated A365_DEMO_ORIGINAL_PACKAGE_ID and the three source fields "
-        "in the ignored .env"
+        "Updated the Package and source fields and generated the dedicated "
+        "Blueprint assignment in the ignored .env"
     )
 
 
 def blueprint_command(args: argparse.Namespace) -> None:
     env = read_env(args.env)
-    if not env.get("A365_DEMO_BLUEPRINT_GROUP"):
-        raise ValueError("Set A365_DEMO_BLUEPRINT_GROUP before resolving a Blueprint")
+    provider_source = env.get("A365_DEMO_PROVIDER_SOURCE_AGENT_ID", "")
+    if not provider_source:
+        raise ValueError("Prepare the selected Package before resolving a Blueprint")
+    expected_assignment = assignment_values(env, provider_source)
+    if (
+        env.get("A365_DEMO_ASSIGNMENT_MODE")
+        != expected_assignment["A365_DEMO_ASSIGNMENT_MODE"]
+        or env.get("A365_DEMO_BLUEPRINT_GROUP")
+        != expected_assignment["A365_DEMO_BLUEPRINT_GROUP"]
+    ):
+        raise ValueError("Generated dedicated assignment is missing or mismatched")
     updates = blueprint_values(
         load_json(args.blueprint),
         env.get("A365_DEMO_BLUEPRINT_OBJECT_ID", ""),
@@ -286,13 +352,31 @@ def blueprint_command(args: argparse.Namespace) -> None:
     )
 
 
+def registration_command(args: argparse.Namespace) -> None:
+    env = read_env(args.env)
+    updates = registration_values(load_json(args.registration))
+    expected_source = COMPANION_PREFIX + env.get(
+        "A365_DEMO_PROVIDER_SOURCE_AGENT_ID", ""
+    )
+    if updates["A365_DEMO_COMPANION_SOURCE_AGENT_ID"] != expected_source:
+        raise ValueError("Registration source does not match the selected Package")
+    update_env(args.env, updates)
+    print(
+        "Updated the companion source, raw Registration ID, and path-safe "
+        "Registration ID in the ignored .env"
+    )
+
+
 def finalize_command(args: argparse.Namespace) -> None:
     env = read_env(args.env)
     required_env = (
         "A365_DEMO_TARGET_NAME",
         "A365_DEMO_ORIGINAL_PACKAGE_ID",
         "A365_DEMO_PROVIDER_SOURCE_AGENT_ID",
+        "A365_DEMO_ASSIGNMENT_MODE",
         "A365_DEMO_BLUEPRINT_GROUP",
+        "A365_DEMO_GROUPING_POLICY_VERSION",
+        "A365_DEMO_APPROVAL_REFERENCE",
         "A365_DEMO_BLUEPRINT_OBJECT_ID",
         "A365_DEMO_BLUEPRINT_APP_ID",
     )
@@ -309,10 +393,15 @@ def finalize_command(args: argparse.Namespace) -> None:
     )
     updates = {
         "A365_DEMO_BLUEPRINT_APP_ID": mapping["blueprintId"],
+        "A365_DEMO_BLUEPRINT_PRINCIPAL_ID": mapping["blueprintPrincipalId"],
         "A365_DEMO_AGENT_IDENTITY_ID": mapping["agentIdentityId"],
+        "A365_DEMO_COMPANION_SOURCE_AGENT_ID": mapping["companionSourceAgentId"],
         "A365_DEMO_COMPANION_REGISTRATION_ID": mapping[
             "companionRegistrationId"
         ],
+        "A365_DEMO_COMPANION_REGISTRATION_ID_PATH": quote(
+            mapping["companionRegistrationId"], safe=""
+        ),
     }
     update_env(args.env, updates)
     args.mapping.parent.mkdir(parents=True, exist_ok=True)
@@ -347,6 +436,14 @@ def parser() -> argparse.ArgumentParser:
         "--blueprint", type=Path, default=DEFAULT_EVIDENCE / "blueprint.json"
     )
     blueprint.set_defaults(func=blueprint_command)
+
+    registration = commands.add_parser("registration")
+    registration.add_argument(
+        "--registration",
+        type=Path,
+        default=DEFAULT_EVIDENCE / "companion-registration.json",
+    )
+    registration.set_defaults(func=registration_command)
 
     finalize = commands.add_parser("finalize")
     finalize.add_argument(

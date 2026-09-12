@@ -21,11 +21,18 @@
 # A365_DEMO_TARGET_NAME=<display-name-before-provider-rename>
 # A365_DEMO_ORIGINAL_PACKAGE_ID=<package-id-before-provider-rename>
 # A365_DEMO_PROVIDER_SOURCE_AGENT_ID=<exact-source-id-before-provider-rename>
-# A365_DEMO_BLUEPRINT_APP_ID=<platform-blueprint-app-id>
+# A365_DEMO_ASSIGNMENT_MODE=<dedicated-or-shared>
+# A365_DEMO_BLUEPRINT_GROUP=<mapped-assignment-group>
+# A365_DEMO_BLUEPRINT_OBJECT_ID=<mapped-blueprint-object-id>
+# A365_DEMO_BLUEPRINT_APP_ID=<mapped-blueprint-app-id>
+# A365_DEMO_BLUEPRINT_PRINCIPAL_ID=<mapped-blueprint-principal-id>
 # A365_DEMO_AGENT_IDENTITY_ID=<existing-agent-identity-id>
+# A365_DEMO_COMPANION_SOURCE_AGENT_ID=<exact-mapped-companion-source-id>
 # A365_DEMO_COMPANION_REGISTRATION_ID=<existing-companion-registration-id>
+# A365_DEMO_COMPANION_REGISTRATION_ID_PATH=<path-safe-registration-id>
 # A365_RENAME_NEW_TARGET_NAME=<display-name-after-provider-rename>
 # A365_RENAME_AFTER_PACKAGE_ID=<package-id-observed-after-sync>
+# A365_RENAME_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp-after-sync>
 #
 # Preserve the before and after sourceAgentId values byte-for-byte in ignored
 # evidence. Do not URL-decode, normalize, or put them in tracked files.
@@ -38,13 +45,20 @@
 @oldTargetName = {{$dotenv A365_DEMO_TARGET_NAME}}
 @originalPackageId = {{$dotenv A365_DEMO_ORIGINAL_PACKAGE_ID}}
 @expectedSourceAgentId = {{$dotenv A365_DEMO_PROVIDER_SOURCE_AGENT_ID}}
+@assignmentMode = {{$dotenv A365_DEMO_ASSIGNMENT_MODE}}
+@blueprintGroup = {{$dotenv A365_DEMO_BLUEPRINT_GROUP}}
+@blueprintObjectId = {{$dotenv A365_DEMO_BLUEPRINT_OBJECT_ID}}
 @blueprintAppId = {{$dotenv A365_DEMO_BLUEPRINT_APP_ID}}
+@blueprintPrincipalId = {{$dotenv A365_DEMO_BLUEPRINT_PRINCIPAL_ID}}
 @agentIdentityId = {{$dotenv A365_DEMO_AGENT_IDENTITY_ID}}
+@companionSourceAgentId = {{$dotenv A365_DEMO_COMPANION_SOURCE_AGENT_ID}}
 @companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
+@companionRegistrationIdPath = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID_PATH}}
 @newTargetName = {{$dotenv A365_RENAME_NEW_TARGET_NAME}}
 @afterPackageId = {{$dotenv A365_RENAME_AFTER_PACKAGE_ID}}
+@newSourceModifiedAt = {{$dotenv A365_RENAME_SOURCE_MODIFIED_AT}}
 @graphBaseUrl = https://graph.microsoft.com
-@renameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@renameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
 
 ###############################################################################
 # Authentication 1 - Request a device code
@@ -120,7 +134,32 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 1.4 - Capture the existing Agent Identity
+# Part 1.4 - Verify the mapped Blueprint
+#
+# Expected: 200. Confirm its object ID and appId match the locked assignment.
+
+# @name renameGetBlueprintBefore
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.5 - Verify the enabled Blueprint principal
+#
+# Expected: 200. Confirm id equals A365_DEMO_BLUEPRINT_PRINCIPAL_ID, appId
+# equals A365_DEMO_BLUEPRINT_APP_ID, and accountEnabled is not false.
+
+# @name renameGetBlueprintPrincipalBefore
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Part 1.6 - Capture the existing Agent Identity
 #
 # Expected: 200. Record only field presence and safe comparison results in
 # tracked notes.
@@ -133,19 +172,19 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 1.5 - Capture the existing companion Registration
+# Part 1.7 - Capture the existing companion Registration
 #
 # Expected: 200.
 # Confirm:
 # - the ID is A365_DEMO_COMPANION_REGISTRATION_ID
-# - sourceAgentId equals the legacy value created by the earlier experiment:
-#   committed-fleet:companion:v1:gcp:<exact-provider-source-id>
-# - do not replace that value solely to adopt the current namespace
+# - sourceAgentId equals A365_DEMO_COMPANION_SOURCE_AGENT_ID exactly
+# - new mappings use agent-governance:companion:v1:gcp:<provider-source-id>
+# - preserve a mapped legacy value rather than changing identity during rename
 # - agentIdentityBlueprintId equals A365_DEMO_BLUEPRINT_APP_ID
 # - agentIdentityId equals A365_DEMO_AGENT_IDENTITY_ID
 
 # @name renameGetRegistrationBefore
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
@@ -186,6 +225,8 @@ Accept: application/json
 # Part 2.2 - Read the selected Package after provider rename and sync
 #
 # Expected: 200 after A365_RENAME_AFTER_PACKAGE_ID is set.
+# Copy the exact nested LastModifiedDateTime into
+# A365_RENAME_SOURCE_MODIFIED_AT before any PATCH.
 
 # @name renameGetPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{afterPackageId}}
@@ -255,17 +296,19 @@ Accept: application/json
 # Expected: 200 with an empty response body.
 #
 # Do not PATCH sourceAgentId, originatingStore, Blueprint, identity, or owner
-# fields as part of a display-name rename.
+# fields as part of a display-name rename. Carry the exact newly observed
+# provider source-modified timestamp with the Registration display name.
 
 # @name renamePatchRegistration
-PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
 OData-Version: 4.0
 
 {
-  "displayName": "{{newTargetName}} - managed companion"
+  "displayName": "{{newTargetName}} - managed companion",
+  "sourceLastModifiedDateTime": "{{newSourceModifiedAt}}"
 }
 
 ###
@@ -277,7 +320,7 @@ OData-Version: 4.0
 # Agent Identity ID, owners, and the new displayName.
 
 # @name renameGetRegistrationAfter
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
@@ -304,7 +347,8 @@ Accept: application/json
 # - unchanged scoped provider source key
 # - before and after Package IDs
 # - before and after source display names
-# - unchanged companion Registration and Agent Identity IDs
+# - unchanged assignment mode, Blueprint group, Blueprint, companion
+#   Registration, and Agent Identity IDs
 # - result of each PATCH and GET
 # - whether companion Package propagation was immediate, delayed, or absent
 #
@@ -337,7 +381,7 @@ Accept: application/json
 # Run only after Part 4.1 succeeds and is verified. Expected: 200.
 
 # @name renameRollbackRegistration
-PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
+PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
 Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json

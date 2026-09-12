@@ -96,6 +96,25 @@ class DemoPreparationTests(unittest.TestCase):
         self.assertEqual(values["A365_DEMO_SOURCE_CREATED_AT"], self.created)
         self.assertEqual(values["A365_DEMO_SOURCE_MODIFIED_AT"], self.modified)
 
+    def test_dedicated_assignment_is_stable_and_source_scoped(self):
+        env = {
+            "A365_TENANT_ID": "fixture-tenant",
+            "A365_DEMO_GROUPING_POLICY_VERSION": "policy-v1",
+            "A365_DEMO_APPROVAL_REFERENCE": "approval-123",
+        }
+        first = prepare_demo.assignment_values(env, self.source)
+        second = prepare_demo.assignment_values(env, self.source)
+        other = prepare_demo.assignment_values(env, self.source + "-other")
+        self.assertEqual(first, second)
+        self.assertEqual(first["A365_DEMO_ASSIGNMENT_MODE"], "dedicated")
+        self.assertTrue(
+            first["A365_DEMO_BLUEPRINT_GROUP"].startswith("dedicated-gcp-")
+        )
+        self.assertNotEqual(
+            first["A365_DEMO_BLUEPRINT_GROUP"],
+            other["A365_DEMO_BLUEPRINT_GROUP"],
+        )
+
     def test_prepare_rejects_package_with_native_identity(self):
         package = self.package()
         package["agentIdentityId"] = self.identity_id
@@ -132,15 +151,35 @@ class DemoPreparationTests(unittest.TestCase):
                 blueprint, "00000000-0000-4000-8000-000000000099"
             )
 
+    def test_registration_values_preserve_raw_id_and_create_path_value(self):
+        values = prepare_demo.registration_values(
+            {
+                "id": "agent-governance:companion:v1:gcp:projects%2Ffixture",
+                "sourceAgentId": prepare_demo.COMPANION_PREFIX + self.source,
+            }
+        )
+        self.assertEqual(
+            values["A365_DEMO_COMPANION_REGISTRATION_ID"],
+            "agent-governance:companion:v1:gcp:projects%2Ffixture",
+        )
+        self.assertEqual(
+            values["A365_DEMO_COMPANION_REGISTRATION_ID_PATH"],
+            "agent-governance%3Acompanion%3Av1%3Agcp%3Aprojects%252Ffixture",
+        )
+
     def test_finalize_verifies_and_returns_durable_mapping(self):
         env = {
+            "A365_TENANT_ID": "fixture-tenant",
             "A365_DEMO_TARGET_NAME": self.target,
             "A365_DEMO_ORIGINAL_PACKAGE_ID": self.package_id,
             "A365_DEMO_PROVIDER_SOURCE_AGENT_ID": self.source,
-            "A365_DEMO_BLUEPRINT_GROUP": "test-v2-dev",
+            "A365_DEMO_ASSIGNMENT_MODE": "dedicated",
+            "A365_DEMO_GROUPING_POLICY_VERSION": "policy-v1",
+            "A365_DEMO_APPROVAL_REFERENCE": "approval-123",
             "A365_DEMO_BLUEPRINT_OBJECT_ID": self.blueprint_object_id,
             "A365_DEMO_BLUEPRINT_APP_ID": self.blueprint_app_id,
         }
+        env.update(prepare_demo.assignment_values(env, self.source))
         blueprint = {
             "id": self.blueprint_object_id,
             "appId": self.blueprint_app_id,
@@ -168,7 +207,14 @@ class DemoPreparationTests(unittest.TestCase):
         self.assertEqual(mapping["companionRegistrationId"], self.registration_id)
         self.assertEqual(mapping["agentIdentityId"], self.identity_id)
         self.assertEqual(mapping["blueprintId"], self.blueprint_app_id)
-        self.assertEqual(mapping["blueprintGroup"], "test-v2-dev")
+        self.assertEqual(
+            mapping["blueprintGroup"],
+            env["A365_DEMO_BLUEPRINT_GROUP"],
+        )
+        self.assertEqual(mapping["assignmentMode"], "dedicated")
+        self.assertEqual(mapping["groupingPolicyVersion"], "policy-v1")
+        self.assertEqual(mapping["approvalReference"], "approval-123")
+        self.assertEqual(mapping["members"], [self.source])
         self.assertEqual(
             mapping["blueprintPrincipalId"],
             "00000000-0000-4000-8000-000000000004",

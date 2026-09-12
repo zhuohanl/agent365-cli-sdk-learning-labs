@@ -351,24 +351,35 @@ per-source sharing decision.
 
 ## DD-005: Add lifecycle
 
-The add flow has two levels. Blueprint assignment and preparation are
-group-level work. Agent Identity and companion Registration preparation are
-per-source work performed while iterating through individual Registry Sync
-Packages.
+The add flow is source-first. Discover the complete inventory, then process
+each selected Registry Sync Package end to end: resolve its assignment,
+prepare or reuse the assignment's Blueprint and principal, resolve its Agent
+Identity, and resolve its companion Registration.
+
+Assignments and Blueprint bindings remain group-level state even though the
+workflow reaches them while processing one source. Lock and reconcile the
+`(tenant, blueprintGroup)` binding before creating anything so a later member
+of an approved shared group reuses the same Blueprint. The default dedicated
+path has one source in the group, so its executable sequence is the same as
+the successful Experiment 03 sequence.
 
 DD-004 defines the assignment modes, group invariants, and policy data used by
 this lifecycle. DD-005 consumes that decision; it does not redefine grouping.
 
-The implementation must plan assignments first, prepare the required group
-Blueprints, and only then process individual sources.
+The implementation must not require a separate tenant-wide grouping pass
+before onboarding can begin. It may batch assignment planning and Blueprint
+preparation for efficiency, but that optimization must preserve the same
+source-level decisions, locks, write gates, and persisted outcomes described
+below.
 
-### Part 1: Resolve assignments and prepare each group Blueprint
+### Part 1: Resolve the source assignment and prepare its group Blueprint
 
-After discovering the complete Package inventory, resolve one approved
-DD-004 assignment for each selected scoped provider source. Reconcile existing
-bindings first; for new eligible sources, generate the dedicated assignment
-under the standing policy unless the source is explicitly selected for shared
-onboarding. An assignment need not exist before discovery.
+After discovering the complete Package inventory, select one Package, read
+its details, and resolve one approved DD-004 assignment for its scoped provider
+source. Reconcile existing bindings first; for a new eligible source, generate
+the dedicated assignment under the standing policy unless the source is
+explicitly selected for shared onboarding. An assignment need not exist before
+discovery.
 
 An `unassigned` source stops at `blueprint-assignment-required`. It remains in
 the observed inventory and journal, but no Entra or companion object is
@@ -376,7 +387,7 @@ created for it. Never create an "unassigned Blueprint" because that would
 silently place unrelated, unreviewed sources into one shared credential
 boundary.
 
-For every approved `(tenant, blueprintGroup)`:
+For the source's approved `(tenant, blueprintGroup)`:
 
 1. Validate the policy version and member allowlist.
 2. Enforce that `dedicated` groups contain exactly one active scoped source.
@@ -384,9 +395,11 @@ For every approved `(tenant, blueprintGroup)`:
    principal from the durable binding.
 4. Create them only when no approved reusable binding exists and creation has
    been explicitly enabled.
-5. Persist the Blueprint object ID, Blueprint app ID, principal ID, platform
+5. Read or create the tenant-local Blueprint principal and verify that it is
+   enabled.
+6. Persist the Blueprint object ID, Blueprint app ID, principal ID, platform
    and offering classifications, assignment mode, policy version, and
-   capacity state.
+   capacity state before creating the source's Agent Identity.
 
 Prepare one Blueprint per approved group, not one Blueprint per platform and
 not automatically one Blueprint per Package. Multiple groups can exist within
@@ -397,10 +410,9 @@ governance boundary.
 Capacity sharding creates another explicitly approved group; it must not
 silently bind one existing group label to multiple active Blueprints.
 
-### Parts 2 and 3: Process one Package at a time
+### Parts 2 and 3: Complete the selected source
 
-Read every page of Registry Sync Package inventory. For each individual
-Package:
+For each selected Package:
 
 1. Read Package Details and extract the exact scoped provider source key:
    `(tenant, platform, native account/project/workspace scope,
@@ -410,11 +422,11 @@ Package:
    identity or companion.
 3. Resolve the approved assignment. If it is `unassigned`, record
    `blueprint-assignment-required` and stop processing that source.
-4. Read and verify the active Blueprint binding for the source's approved
-   `(tenant, blueprintGroup)`.
-5. Resolve or create one Agent Identity for that source under the group
+4. Complete Part 1 by reading and verifying the active Blueprint and principal
+   binding for the source's approved `(tenant, blueprintGroup)`.
+5. In Part 2, resolve or create one Agent Identity for that source under the group
    Blueprint, then save its ID before continuing.
-6. Resolve the companion state from the journal. If an active Registration ID
+6. In Part 3, resolve the companion state from the journal. If an active Registration ID
    exists, read and verify it instead of creating another Registration.
 7. When an approved source has no existing or unresolved companion, create
    exactly one Registration using the DD-002 companion source ID and the
@@ -435,6 +447,7 @@ The intended add states are:
 package-observed
 -> blueprint-assignment-resolved
 -> group-blueprint-resolved
+-> blueprint-principal-resolved
 -> agent-identity-resolved
 -> companion-create-pending
 -> companion-created
@@ -448,16 +461,16 @@ package-observed
 -> blueprint-assignment-required
 ```
 
-The Blueprint state is group-level preparation. The remaining states are
-tracked independently for each Package/source.
+The assignment and Blueprint state is group-level state reached through the
+source workflow. The remaining states are tracked independently for each
+Package/source.
 
 ### Add flow
 
 This flow follows the rightmost concept in
 [`third_party_agent_registry.svg`](third_party_agent_registry.svg): discover
-the sources first, resolve their approved Blueprint assignments, prepare each
-group Blueprint, and then loop through assigned Packages to create or resolve
-the per-source objects.
+the sources first, then process each selected Package through assignment,
+Blueprint, Agent Identity, and companion Registration resolution.
 
 All three lifecycle diagrams below use the same regions, so they can be read
 against each other:
@@ -466,7 +479,7 @@ against each other:
 | --- | --- | --- |
 | Discovery / detection | Amber | Read-only observation before any decision |
 | Assignment resolution | Grey | Generate or reconcile assignments; blocked sources stop without creating objects |
-| PART 1 | Blue | Blueprint, one per approved shared or dedicated group |
+| PART 1 | Blue | Blueprint and enabled principal, one binding per approved shared or dedicated group |
 | PART 2 | Purple | Agent Identity, one per scoped provider source |
 | PART 3 | Green | Companion Registration, one per scoped provider source |
 | Loop | Grey | Per-source iteration boundary |
@@ -481,34 +494,36 @@ flowchart TB
         A1 --> A2
     end
 
-    subgraph ASSIGN["<b>ASSIGNMENT RESOLUTION</b> - dedicated by default"]
-        direction TB
-        B6["Resolve DD-004 assignment:<br/>reconcile existing bindings;<br/>approve explicit shared onboarding;<br/>otherwise generate eligible dedicated"]
-        B0{"Assignment<br/>outcome?"}
-        B4["Record<br/>blueprint-assignment-required"]
-        B7["Retain known binding and IDs;<br/>record stop reason;<br/>reconciliation-required if unresolved"]
-        B5["Persist assignmentMode,<br/>blueprintGroup, members,<br/>policy version and approval reference"]
-        B6 --> B0
-        B0 -->|Unassigned| B4
-        B0 -->|"Existing binding blocked"| B7
-        B0 -->|"Approved and ready"| B5
-    end
-
-    subgraph PART1["<b>PART 1: BLUEPRINT</b> - once per approved group"]
-        direction TB
-        B1{"Approved group<br/>Blueprint exists?"}
-        B2["Create one approved<br/>group Blueprint"]
-        B3["Blueprint ID bound to<br/>(tenant, blueprintGroup)"]
-        B1 -->|No| B2
-        B2 --> B3
-        B1 -->|Yes| B3
-    end
-
-    subgraph LOOP["<b>FOR EACH ASSIGNED PACKAGE</b> - repeat Parts 2 and 3"]
+    subgraph LOOP["<b>FOR EACH SELECTED PACKAGE</b> - complete one source before the next"]
         direction TB
         C1["Read Package Details"]
-        C2["Companion source ID<br/>built from the exact scoped<br/>provider sourceAgentId"]
+        C2["Build the exact scoped<br/>provider source key"]
         C1 --> C2
+
+        subgraph ASSIGN["<b>ASSIGNMENT RESOLUTION</b> - dedicated by default"]
+            direction TB
+            B6["Reconcile an existing binding;<br/>use approved shared onboarding;<br/>otherwise generate dedicated"]
+            B0{"Assignment<br/>outcome?"}
+            B4["Record<br/>blueprint-assignment-required"]
+            B7["Retain known binding and IDs;<br/>record stop reason;<br/>reconciliation-required if unresolved"]
+            B5["Persist assignmentMode,<br/>blueprintGroup, members,<br/>policy version and approval reference"]
+            B6 --> B0
+            B0 -->|Unassigned| B4
+            B0 -->|"Existing binding blocked"| B7
+            B0 -->|"Approved and ready"| B5
+        end
+
+        subgraph PART1["<b>PART 1: BLUEPRINT</b> - resolve the group binding"]
+            direction TB
+            P1{"Bound Blueprint<br/>already exists?"}
+            P2["Create one Blueprint<br/>for the approved group"]
+            P3["Read or create the<br/>Blueprint principal"]
+            P4["Verify and persist the<br/>Blueprint and principal IDs"]
+            P1 -->|No| P2
+            P2 --> P3
+            P1 -->|Yes| P3
+            P3 --> P4
+        end
 
         subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - one per source"]
             direction TB
@@ -522,11 +537,13 @@ flowchart TB
 
         subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - one per source"]
             direction TB
+            E5["Build the companion source ID<br/>from the exact provider sourceAgentId"]
             E0["Registration POST needs<br/>all three inputs together"]
             E1{"Companion already<br/>recorded?"}
             E2["Reconcile the recorded<br/>outcome, create nothing"]
             E3["POST one companion<br/>Registration"]
             E4["Registration ID"]
+            E5 --> E0
             E0 --> E1
             E1 -->|Yes| E2
             E1 -->|No| E3
@@ -534,19 +551,20 @@ flowchart TB
         end
 
         F1["Persist the mapping:<br/>source, Package, Blueprint,<br/>Identity, Registration"]
-        F2["Re-read the original<br/>Registry Sync Package"]
+        F2["List both Package records and<br/>re-read them independently"]
         E2 --> F1
         E4 --> F1
         F1 --> F2
     end
 
-    A2 --> B6
-    B5 --> B1
-    B3 --> C1
-    C2 --> D1
-    B3 -.->|"input 1: Blueprint ID"| E0
+    A2 --> C1
+    C2 --> B6
+    B5 --> P1
+    P4 --> D1
+    P4 -.->|"input 1: Blueprint ID"| E0
     D3 -->|"input 2: Agent Identity ID"| E0
-    C2 -.->|"input 3: companion source ID"| E0
+    C2 --> E5
+    E5 -.->|"input 3: companion source ID"| E0
     F2 --> G1["Finish when every assigned<br/>Package and group is reconciled"]
 
     style DISCOVERY fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
@@ -563,12 +581,12 @@ Blueprint ID from Part 1, the Agent Identity ID from Part 2, and the
 deterministic companion source ID derived from the exact scoped provider
 `sourceAgentId` all exist for the same source.
 
-Part 1 is preparation performed once for each approved group. The outer
-Package loop then runs Parts 2 and 3 separately for each assigned scoped
-provider source. That loop owns one mapping entry, one Agent Identity, and one
-companion Registration per source; it reuses the group Blueprint prepared in
-Part 1. In `dedicated` mode the group has one member, so the same design
-produces a one-to-one Blueprint without introducing another workflow.
+The Package loop runs Parts 1, 2, and 3 for one scoped source before advancing.
+Part 1 uses a group lock and durable binding, so a later source in an approved
+shared group reuses the prepared Blueprint rather than creating another one.
+In `dedicated` mode the generated group has one member, making the concrete
+sequence the same as Experiment 03: Package, Blueprint and principal, Agent
+Identity, companion Registration, then independent Package readback.
 
 ## DD-006: Delete lifecycle
 
@@ -625,11 +643,11 @@ to its documented semantics. Do not recreate the Registration as recovery.
 
 ### Delete flow
 
-The three parts are read top to bottom in the same order as the add flow. The
-write order is deliberately the reverse: the companion Registration is always
-deleted before the Agent Identity, and the mapped group Blueprint is never part
-of per-agent cleanup. The ordered execution block at the bottom carries that
-constraint.
+Delete follows the executable dependency order rather than visually replaying
+Add in reverse-labelled regions. After detection and confirmation, Part 3
+retires the companion Registration first, Part 2 decides whether the Agent
+Identity can be retired, and Part 1 records that the mapped Blueprint remains
+outside per-agent cleanup.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
@@ -656,62 +674,48 @@ flowchart TB
         B1 -->|Yes| B3
     end
 
-    subgraph PART1["<b>PART 1: BLUEPRINT</b> - retained"]
-        direction TB
-        C1["Mapped group scope:<br/>retain the Blueprint and<br/>exclude it from cleanup"]
-    end
-
-    subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - decide disposition"]
-        direction TB
-        D1{"Dedicated to this source,<br/>no remaining consumers,<br/>separately approved?"}
-        D2["Plan: retain the<br/>Agent Identity"]
-        D3["Plan: delete the<br/>Agent Identity"]
-        D1 -->|No| D2
-        D1 -->|Yes| D3
-    end
-
-    subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - decide retirement"]
+    subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - retire first"]
         direction TB
         E1{"Registration retirement<br/>approved?"}
-        E2["Plan: delete the mapped<br/>companion Registration"]
         E3["Mark reconciliation-required<br/>and stop"]
+        E2["DELETE the mapped<br/>companion Registration"]
+        E4["GET the Registration<br/>and require 404"]
+        E5["Re-read Package<br/>inventory independently"]
         E1 -->|Yes| E2
         E1 -->|No| E3
+        E2 --> E4
+        E4 --> E5
     end
 
-    subgraph EXEC["<b>ORDERED EXECUTION</b> - Registration before Identity"]
+    subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - decide after Registration"]
         direction TB
-        F1["Step 1: DELETE the mapped<br/>companion Registration"]
-        F2["Step 2: GET the Registration<br/>and require 404"]
-        F3["Step 3: re-read Package<br/>inventory independently"]
-        F4{"Identity deletion<br/>planned?"}
-        F5["Record registration-deleted,<br/>identity-retained"]
-        F6["Step 4: DELETE the<br/>dedicated Agent Identity"]
-        F7["Step 5: GET the Identity<br/>and require 404"]
-        F8["Step 6: write the<br/>durable tombstone"]
-        F1 --> F2
-        F2 --> F3
-        F3 --> F4
-        F4 -->|No| F5
-        F4 -->|Yes| F6
-        F6 --> F7
-        F5 --> F8
-        F7 --> F8
+        D1{"Dedicated to this source,<br/>no remaining consumers,<br/>separately approved?"}
+        D2["Retain the<br/>Agent Identity"]
+        D3["DELETE the dedicated<br/>Agent Identity"]
+        D4["GET the Identity<br/>and require 404"]
+        D1 -->|No| D2
+        D1 -->|Yes| D3
+        D3 --> D4
+    end
+
+    subgraph PART1["<b>PART 1: BLUEPRINT</b> - retain the binding"]
+        direction TB
+        C1["Keep the mapped Blueprint;<br/>shared or dedicated retirement<br/>requires a separate lifecycle"]
+        C2["Write the durable tombstone<br/>with assignment and object IDs"]
+        C1 --> C2
     end
 
     A5 --> B1
-    B3 --> C1
-    C1 --> D1
-    D2 --> E1
-    D3 --> E1
-    E2 --> F1
+    B3 --> E1
+    E5 --> D1
+    D2 --> C1
+    D4 --> C1
 
     style DETECT fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
     style GATE fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
     style PART1 fill:#e8f1fd,stroke:#1d4ed8,stroke-width:4px,color:#1e3a8a
     style PART2 fill:#f3ecfd,stroke:#6d28d9,stroke-width:4px,color:#4c1d95
     style PART3 fill:#e7f8f0,stroke:#047857,stroke-width:4px,color:#064e3b
-    style EXEC fill:#fdeaea,stroke:#b91c1c,stroke-width:3px,color:#7f1d1d
 ```
 
 The destructive path uses only IDs recovered from the locked mapping.
@@ -737,9 +741,9 @@ Use this reconciliation sequence:
 5. Calculate the intended companion display name from the new source display
    name and the companion display-name convention. Do not reconstruct or
    modify the companion source ID.
-6. GET the mapped Agent Identity and companion Registration and verify their
-   IDs, Blueprint relationship, source relationship, and ownership before
-   changing either object.
+6. GET the mapped Blueprint, enabled Blueprint principal, Agent Identity, and
+   companion Registration. Verify the assignment binding, IDs, source
+   relationship, and ownership before changing either object.
 7. PATCH the Agent Identity `displayName` through its typed v1.0 endpoint and
    PATCH the known companion Registration `displayName` through its beta
    endpoint. The Registration update can also carry the newly observed
@@ -795,15 +799,16 @@ propagation must be established in a bounded experiment before automation.
 
 ### Rename flow
 
-Rename reads the same three parts top to bottom. Part 1 is a confirmation
-checkpoint with no write; only Parts 2 and 3 change a display name.
+Rename locks and verifies the existing source mapping before touching any
+object. Part 1 confirms that the assignment and Blueprint binding are
+unchanged; only Parts 2 and 3 change display metadata.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
 flowchart TB
     subgraph DETECT["<b>DETECTION</b> - read only"]
         direction TB
-        A1["Capture the Package<br/>and mapped objects"]
+        A1["Capture the Package,<br/>assignment, and mapped objects"]
         A2["Rename only the disposable<br/>provider agent"]
         A3["Wait for healthy sync<br/>and propagation"]
         A4["Read Package List pages<br/>and Package Details"]
@@ -833,7 +838,7 @@ flowchart TB
 
     subgraph PART1["<b>PART 1: BLUEPRINT</b> - no write"]
         direction TB
-        C1["Confirm the Blueprint and<br/>every identifier are unchanged"]
+        C1["Confirm assignmentMode,<br/>blueprintGroup, Blueprint,<br/>and principal are unchanged"]
     end
 
     subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - rename"]
