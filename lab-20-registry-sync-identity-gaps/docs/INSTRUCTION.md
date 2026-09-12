@@ -154,24 +154,23 @@ The repository ignores `.env`. Never put real values into
 the tracked files under `experiments/` or `demos/`,
 tracked Markdown, chat, an issue, or a screenshot.
 
-The add-companion demo requires the selected source and the standing
-dedicated-onboarding policy metadata before it starts:
+The add-companion demo requires only the selected source before it starts:
 
 ```dotenv
 A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
-A365_DEMO_GROUPING_POLICY_VERSION=<approved-standing-policy-version>
-A365_DEMO_APPROVAL_REFERENCE=<approved-standing-policy-reference>
 ```
 
 The target name is the operator's inventory selection. After reading Package
 Details, the helper generates a deterministic single-member Blueprint group
-from the tenant, platform, and exact provider source key. It does not infer a
-shared group from provider metadata or the Package display name.
+from the tenant, platform, and exact provider source key. It also writes fixed
+Lab 20 experiment-only policy and approval-reference values into the ignored
+mapping. The operator does not supply those values, and they must not be
+treated as external governance approval. The helper does not infer a shared
+group from provider metadata or the Package display name.
 
 Before starting the Add demo, choose the target GCP agent and put its exact
 Package `displayName` in `A365_DEMO_TARGET_NAME` in the ignored Lab 20 `.env`.
-Copy spaces and capitalization exactly. Record the standing policy version and
-approval reference that authorize dedicated onboarding.
+Copy spaces and capitalization exactly.
 
 After the helper generates `A365_DEMO_BLUEPRINT_GROUP`, reconcile that exact
 assignment against protected local mapping. Set

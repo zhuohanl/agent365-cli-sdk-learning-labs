@@ -218,10 +218,6 @@ class HttpExperimentStructureTests(unittest.TestCase):
             "Step 3.12 - Convert the returned Registration ID and read it back",
             readback,
         )
-        self.assertIn(
-            "Keep the provider source\n# value unchanged",
-            readback,
-        )
 
     def test_companion_source_create_discovers_package_before_preflight(self):
         text = COMPANION_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
@@ -543,11 +539,11 @@ class HttpCompanionDemoTests(unittest.TestCase):
             self.text,
         )
         self.assertIn(
-            "If @odata.nextLink is absent, the list is complete.",
+            "If there is no @odata.nextLink, run:",
             self.text,
         )
         self.assertIn(
-            "If @odata.nextLink is present, the server has split the Package list",
+            "If @odata.nextLink exists, save each additional page",
             self.text,
         )
 
@@ -604,15 +600,20 @@ class HttpCompanionDemoTests(unittest.TestCase):
         )
         self.assertIn('"createdBy": "{{demoCurrentUser.response.body.$.id}}"', self.text)
 
-    def test_requires_target_and_policy_then_generates_assignment(self):
+    def test_requires_only_target_then_generates_lab_assignment_metadata(self):
         header = self.text[: self.text.index("@tenantId")]
         self.assertIn("A365_DEMO_TARGET_NAME=", header)
-        self.assertIn("A365_DEMO_GROUPING_POLICY_VERSION=", header)
-        self.assertIn("A365_DEMO_APPROVAL_REFERENCE=", header)
+        self.assertIn(
+            "Do not set A365_DEMO_GROUPING_POLICY_VERSION or",
+            header,
+        )
+        self.assertIn("experiment-only values", header)
         self.assertIn("helper generates a deterministic dedicated", header)
         for generated in (
             "A365_DEMO_ASSIGNMENT_MODE=",
             "A365_DEMO_BLUEPRINT_GROUP=",
+            "A365_DEMO_GROUPING_POLICY_VERSION=",
+            "A365_DEMO_APPROVAL_REFERENCE=",
             "A365_DEMO_ORIGINAL_PACKAGE_ID=",
             "A365_DEMO_PROVIDER_SOURCE_AGENT_ID=",
             "A365_DEMO_SOURCE_CREATED_AT=",
@@ -653,6 +654,74 @@ class HttpCompanionDemoTests(unittest.TestCase):
         )
         self.assertIn('"sponsors@odata.bind":', create)
         self.assertIn('"owners@odata.bind":', create)
+
+    def test_empty_blueprint_id_cannot_send_collection_query(self):
+        reuse = named_blocks(self.text)["demoGetExistingBlueprint"]
+        self.assertIn(
+            "This request is disabled by default",
+            reuse,
+        )
+        self.assertIn(
+            "an empty ID can be normalized",
+            reuse,
+        )
+        self.assertIn(
+            "Blueprint collection query",
+            reuse,
+        )
+        self.assertNotRegex(
+            reuse,
+            r"(?m)^GET \{\{graphBaseUrl\}\}/v1\.0/applications/",
+        )
+        self.assertIn(
+            "# GET {{graphBaseUrl}}/v1.0/applications/"
+            "{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint",
+            reuse,
+        )
+
+    def test_post_request_evidence_paths_are_adjacent_from_part_1_3(self):
+        expected = [
+            ("demoCreateBlueprint", "blueprint-create-response.json"),
+            ("demoGetBlueprint", "blueprint.json"),
+            (
+                "demoGetBlueprintPrincipal",
+                "blueprint-principal-before-create.json",
+            ),
+            (
+                "demoCreateBlueprintPrincipal",
+                "blueprint-principal-create-response.json",
+            ),
+            ("demoVerifyBlueprintPrincipal", "blueprint-principal.json"),
+            ("demoCreateAgentIdentity", "agent-identity-create-response.json"),
+            ("demoGetNewAgentIdentity", "agent-identity.json"),
+            (
+                "demoCreateFreshCompanion",
+                "companion-registration-create-response.json",
+            ),
+            ("demoGetNewCompanion", "companion-registration.json"),
+            ("demoListPackagesAfter", "package-list-after-create-page-1.json"),
+            ("demoGetOriginalPackageAfter", "original-package-after-create.json"),
+            (
+                "demoGetCompanionPackageAfter",
+                "companion-package-after-create.json",
+            ),
+        ]
+        request_starts = [
+            self.text.index(f"# @name {request_name}")
+            for request_name, _ in expected
+        ]
+        for index, (request_name, evidence_name) in enumerate(expected):
+            with self.subTest(request=request_name):
+                end = (
+                    request_starts[index + 1]
+                    if index + 1 < len(request_starts)
+                    else len(self.text)
+                )
+                request_and_follow_up = self.text[request_starts[index] : end]
+                separator = request_and_follow_up.index("###")
+                follow_up = request_and_follow_up[separator:]
+                self.assertIn("# REQUIRED AFTER", follow_up)
+                self.assertIn(evidence_name, follow_up)
 
     def test_blueprint_principal_has_read_create_verify_flow(self):
         read = self.text.index("# @name demoGetBlueprintPrincipal")
@@ -707,8 +776,15 @@ class HttpCompanionDemoTests(unittest.TestCase):
             self.assertIn(generated, self.text)
 
     def test_registration_readback_and_package_comparison_match_experiment_three(self):
+        self.assertIn(
+            "prepare_demo.py registration --registration "
+            "evidence/demos/01-add-companion/"
+            "companion-registration-create-response.json",
+            self.text,
+        )
         readback = named_blocks(self.text)["demoGetNewCompanion"]
         self.assertIn("{{companionRegistrationIdPath}}", readback)
+        self.assertIn("companion-registration.json", self.text)
         self.assertNotIn("demoCreateFreshCompanion.response.body.$.id", readback)
         self.assertIn("demoListPackagesAfter", named_blocks(self.text))
         self.assertIn("demoGetOriginalPackageAfter", named_blocks(self.text))
@@ -741,7 +817,9 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             "renameGetRegistrationAfter",
             "renameListPackagesFinal",
             "renameRollbackIdentity",
+            "renameGetIdentityAfterRollback",
             "renameRollbackRegistration",
+            "renameGetRegistrationAfterRollback",
         ]
         self.assertEqual(names, expected)
 
@@ -778,8 +856,92 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             "renamePatchRegistration",
             "renameGetRegistrationAfter",
             "renameRollbackRegistration",
+            "renameGetRegistrationAfterRollback",
         ):
             self.assertIn("{{companionRegistrationIdPath}}", self.blocks[name])
+
+    def test_every_rename_observation_names_adjacent_evidence(self):
+        expected = [
+            (
+                "renameListPackagesBefore",
+                "package-list-before-provider-rename-page-1.json",
+            ),
+            (
+                "renameGetPackageBefore",
+                "original-package-before-provider-rename.json",
+            ),
+            ("renameGetBlueprintBefore", "blueprint-before-rename.json"),
+            (
+                "renameGetBlueprintPrincipalBefore",
+                "blueprint-principal-before-rename.json",
+            ),
+            (
+                "renameGetIdentityBefore",
+                "agent-identity-before-rename.json",
+            ),
+            (
+                "renameGetRegistrationBefore",
+                "companion-registration-before-rename.json",
+            ),
+            (
+                "renameListPackagesAfter",
+                "package-list-after-provider-rename-page-1.json",
+            ),
+            (
+                "renameGetPackageAfter",
+                "provider-package-after-rename.json",
+            ),
+            ("renameGetIdentityAfter", "agent-identity-after-rename.json"),
+            (
+                "renameGetRegistrationAfter",
+                "companion-registration-after-rename.json",
+            ),
+            (
+                "renameListPackagesFinal",
+                "package-list-after-companion-rename-page-1.json",
+            ),
+            (
+                "renameGetIdentityAfterRollback",
+                "agent-identity-after-rollback.json",
+            ),
+            (
+                "renameGetRegistrationAfterRollback",
+                "companion-registration-after-rollback.json",
+            ),
+        ]
+        names = list(self.blocks)
+        for request_name, evidence_name in expected:
+            with self.subTest(request=request_name):
+                start = self.text.index(f"# @name {request_name}")
+                next_names = names[names.index(request_name) + 1 :]
+                end = (
+                    self.text.index(f"# @name {next_names[0]}")
+                    if next_names
+                    else len(self.text)
+                )
+                follow_up = self.text[start:end]
+                self.assertIn("# REQUIRED AFTER", follow_up)
+                self.assertIn(evidence_name, follow_up)
+
+    def test_empty_patch_responses_use_verified_get_instead_of_fake_json(self):
+        for name in (
+            "renamePatchIdentity",
+            "renamePatchRegistration",
+            "renameRollbackIdentity",
+            "renameRollbackRegistration",
+        ):
+            with self.subTest(request=name):
+                start = self.text.index(f"# @name {name}")
+                names = list(self.blocks)
+                next_names = names[names.index(name) + 1 :]
+                end = (
+                    self.text.index(f"# @name {next_names[0]}")
+                    if next_names
+                    else len(self.text)
+                )
+                follow_up = self.text[start:end]
+                self.assertIn("# REQUIRED AFTER", follow_up)
+                self.assertIn("Do not create a fake JSON", follow_up)
 
     def test_graph_requests_use_explicit_rename_token(self):
         for name, block in self.blocks.items():

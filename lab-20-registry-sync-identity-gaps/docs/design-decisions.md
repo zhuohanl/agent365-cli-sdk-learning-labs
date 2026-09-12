@@ -472,77 +472,93 @@ This flow follows the rightmost concept in
 the sources first, then process each selected Package through assignment,
 Blueprint, Agent Identity, and companion Registration resolution.
 
-All three lifecycle diagrams below use the same regions, so they can be read
-against each other:
+All three lifecycle diagrams below use the same colours. Read the boxes from
+top to bottom; a box asks either "what do I check?" or "what do I do next?"
 
 | Region | Colour | Meaning |
 | --- | --- | --- |
-| Discovery / detection | Amber | Read-only observation before any decision |
-| Assignment resolution | Grey | Generate or reconcile assignments; blocked sources stop without creating objects |
-| PART 1 | Blue | Blueprint and enabled principal, one binding per approved shared or dedicated group |
-| PART 2 | Purple | Agent Identity, one per scoped provider source |
-| PART 3 | Green | Companion Registration, one per scoped provider source |
-| Loop | Grey | Per-source iteration boundary |
+| Find and check | Amber | Read existing data; do not change anything |
+| Decide and approve | Grey | Make the safety decision; stop when the answer is unclear |
+| Blueprint | Blue | Prepare the permission container used by one or more approved agents |
+| Agent Identity | Purple | Prepare the enterprise identity for this one provider agent |
+| Companion Registration | Green | Create the Agent 365-managed record beside the provider-owned inventory record |
+| One-agent loop | Grey | Finish one provider agent before starting another |
+
+Plain-English examples:
+
+- **Dedicated** means one Blueprint is reserved for one provider agent. For
+  example, `GCP Support Agent A` gets `Support Agent A Blueprint`, and no other
+  agent uses that Blueprint.
+- **Shared** means several specifically approved agents use the same Blueprint.
+  For example, `Support Agent A` and `Support Agent B` may use
+  `Support Team Blueprint` only after both agents and that sharing decision
+  have been reviewed.
+- A **provider source key** means the stable facts that identify the provider
+  agent: its platform, its native scope, and its provider ID. A display name or
+  Registry Sync Package ID can change without changing this key.
+- A **companion** is the separate Agent 365-managed Registration and Package.
+  It does not replace or add identity fields to the original Registry Sync
+  Package.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
 flowchart TB
-    subgraph DISCOVERY["<b>DISCOVERY</b> - read only"]
+    subgraph DISCOVERY["<b>FIND PROVIDER AGENTS</b> - read only"]
         direction TB
-        A1["Read every<br/>Package List page"]
-        A2["Read scoped provider<br/>source keys"]
+        A1["Read every inventory page"]
+        A2["Identify each provider agent<br/>by platform, scope, and provider ID"]
         A1 --> A2
     end
 
-    subgraph LOOP["<b>FOR EACH SELECTED PACKAGE</b> - complete one source before the next"]
+    subgraph LOOP["<b>SET UP ONE PROVIDER AGENT AT A TIME</b>"]
         direction TB
-        C1["Read Package Details"]
-        C2["Build the exact scoped<br/>provider source key"]
+        C1["Read this agent's full<br/>Registry Sync record"]
+        C2["Build its stable source key:<br/>platform + scope + provider ID"]
         C1 --> C2
 
-        subgraph ASSIGN["<b>ASSIGNMENT RESOLUTION</b> - dedicated by default"]
+        subgraph ASSIGN["<b>CHOOSE A BLUEPRINT</b> - one-agent Blueprint by default"]
             direction TB
-            B6["Reconcile an existing binding;<br/>use approved shared onboarding;<br/>otherwise generate dedicated"]
-            B0{"Assignment<br/>outcome?"}
-            B4["Record<br/>blueprint-assignment-required"]
-            B7["Retain known binding and IDs;<br/>record stop reason;<br/>reconciliation-required if unresolved"]
-            B5["Persist assignmentMode,<br/>blueprintGroup, members,<br/>policy version and approval reference"]
+            B6["Check saved assignments<br/>and any approved sharing decision"]
+            B0{"Is the choice<br/>clear and approved?"}
+            B4["Stop: this agent still needs<br/>a Blueprint decision"]
+            B7["Stop: saved information conflicts;<br/>keep the known IDs for investigation"]
+            B5["Save the choice and members<br/><br/>Dedicated example: only GCP Agent A<br/>Shared example: approved Agents A and B"]
             B6 --> B0
-            B0 -->|Unassigned| B4
-            B0 -->|"Existing binding blocked"| B7
-            B0 -->|"Approved and ready"| B5
+            B0 -->|"No decision yet"| B4
+            B0 -->|"Saved records conflict"| B7
+            B0 -->|"Yes"| B5
         end
 
-        subgraph PART1["<b>PART 1: BLUEPRINT</b> - resolve the group binding"]
+        subgraph PART1["<b>PART 1: PREPARE THE BLUEPRINT</b>"]
             direction TB
-            P1{"Bound Blueprint<br/>already exists?"}
-            P2["Create one Blueprint<br/>for the approved group"]
-            P3["Read or create the<br/>Blueprint principal"]
-            P4["Verify and persist the<br/>Blueprint and principal IDs"]
+            P1{"Does the chosen group<br/>already have a Blueprint?"}
+            P2["Create one Blueprint<br/>for this approved group"]
+            P3["Make sure its sign-in object<br/>(Blueprint principal) exists"]
+            P4["Verify and save the Blueprint<br/>and principal IDs"]
             P1 -->|No| P2
             P2 --> P3
             P1 -->|Yes| P3
             P3 --> P4
         end
 
-        subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - one per source"]
+        subgraph PART2["<b>PART 2: PREPARE THIS AGENT'S IDENTITY</b>"]
             direction TB
-            D1{"Identity already<br/>mapped?"}
-            D2["Create Agent Identity<br/>under the group Blueprint"]
-            D3["Agent Identity ID"]
+            D1{"Does this provider agent<br/>already have its own Identity?"}
+            D2["Create one Agent Identity<br/>under the chosen Blueprint"]
+            D3["Verify and save<br/>the Agent Identity ID"]
             D1 -->|No| D2
             D2 --> D3
             D1 -->|Yes| D3
         end
 
-        subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - one per source"]
+        subgraph PART3["<b>PART 3: CREATE THE AGENT 365 COMPANION</b>"]
             direction TB
-            E5["Build the companion source ID<br/>from the exact provider sourceAgentId"]
-            E0["Registration POST needs<br/>all three inputs together"]
-            E1{"Companion already<br/>recorded?"}
-            E2["Reconcile the recorded<br/>outcome, create nothing"]
-            E3["POST one companion<br/>Registration"]
-            E4["Registration ID"]
+            E5["Build a stable companion source ID<br/>from the provider ID"]
+            E0["Gather the three required IDs:<br/>Blueprint + Agent Identity + companion source"]
+            E1{"Is a companion already<br/>saved for this provider agent?"}
+            E2["Stop and verify the saved companion;<br/>do not create a duplicate"]
+            E3["Create one companion Registration"]
+            E4["Verify and save<br/>the Registration ID"]
             E5 --> E0
             E0 --> E1
             E1 -->|Yes| E2
@@ -550,8 +566,8 @@ flowchart TB
             E3 --> E4
         end
 
-        F1["Persist the mapping:<br/>source, Package, Blueprint,<br/>Identity, Registration"]
-        F2["List both Package records and<br/>re-read them independently"]
+        F1["Save the complete relationship:<br/>provider agent, both Packages,<br/>Blueprint, Identity, Registration"]
+        F2["Read the original Package and<br/>new companion Package separately"]
         E2 --> F1
         E4 --> F1
         F1 --> F2
@@ -561,11 +577,11 @@ flowchart TB
     C2 --> B6
     B5 --> P1
     P4 --> D1
-    P4 -.->|"input 1: Blueprint ID"| E0
-    D3 -->|"input 2: Agent Identity ID"| E0
+    P4 -.->|"Blueprint ID"| E0
+    D3 -->|"Agent Identity ID"| E0
     C2 --> E5
-    E5 -.->|"input 3: companion source ID"| E0
-    F2 --> G1["Finish when every assigned<br/>Package and group is reconciled"]
+    E5 -.->|"Companion source ID"| E0
+    F2 --> G1["Finish this agent,<br/>then move to the next one"]
 
     style DISCOVERY fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
     style ASSIGN fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
@@ -652,56 +668,56 @@ outside per-agent cleanup.
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
 flowchart TB
-    subgraph DETECT["<b>DETECTION</b> - read only"]
+    subgraph DETECT["<b>CHECK WHETHER THE PROVIDER AGENT IS GONE</b> - read only"]
         direction TB
-        A1["Refresh every<br/>Package List page"]
-        A2{"Scoped provider<br/>source key still<br/>present?"}
-        A3["Same Package ID:<br/>keep companion,<br/>refresh state"]
-        A4["New Package ID:<br/>update the Package<br/>pointer only"]
-        A5["Mark<br/>source-missing-candidate"]
+        A1["Read every current<br/>inventory page"]
+        A2{"Can we still find the same provider agent<br/>using platform + scope + provider ID?"}
+        A3["Yes, same Package ID:<br/>keep everything"]
+        A4["Yes, new Package ID:<br/>update only the saved Package ID"]
+        A5["No: mark it as possibly missing;<br/>do not delete anything yet"]
         A1 --> A2
         A2 -->|Yes, same Package ID| A3
         A2 -->|Yes, new Package ID| A4
         A2 -->|No| A5
     end
 
-    subgraph GATE["<b>CONFIRMATION GATE</b> - nothing is deleted yet"]
+    subgraph GATE["<b>CONFIRM THE DELETION</b> - nothing is deleted yet"]
         direction TB
-        B1{"Provider deletion,<br/>healthy sync, and<br/>grace period all<br/>confirmed?"}
-        B2["Mark reconciliation-required<br/>and stop"]
-        B3["Lock mapping; read<br/>Registration, Identity,<br/>and dependents"]
+        B1{"Did the provider confirm deletion,<br/>did sync succeed, and did we wait<br/>long enough for changes to arrive?"}
+        B2["No or unclear:<br/>record the uncertainty and stop"]
+        B3["Yes: lock the saved mapping and<br/>read the Registration, Identity,<br/>and anything that still uses them"]
         B1 -->|No| B2
         B1 -->|Yes| B3
     end
 
-    subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - retire first"]
+    subgraph PART3["<b>PART 3: DELETE THE COMPANION REGISTRATION FIRST</b>"]
         direction TB
-        E1{"Registration retirement<br/>approved?"}
-        E3["Mark reconciliation-required<br/>and stop"]
-        E2["DELETE the mapped<br/>companion Registration"]
-        E4["GET the Registration<br/>and require 404"]
-        E5["Re-read Package<br/>inventory independently"]
+        E1{"Is deletion of this<br/>Registration approved?"}
+        E3["No: keep it and stop"]
+        E2["Delete the saved<br/>companion Registration"]
+        E4["Read it again;<br/>404 confirms it is gone"]
+        E5["Read inventory again;<br/>do not assume its Package vanished"]
         E1 -->|Yes| E2
         E1 -->|No| E3
         E2 --> E4
         E4 --> E5
     end
 
-    subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - decide after Registration"]
+    subgraph PART2["<b>PART 2: DECIDE WHETHER TO DELETE THE AGENT IDENTITY</b>"]
         direction TB
-        D1{"Dedicated to this source,<br/>no remaining consumers,<br/>separately approved?"}
-        D2["Retain the<br/>Agent Identity"]
-        D3["DELETE the dedicated<br/>Agent Identity"]
-        D4["GET the Identity<br/>and require 404"]
+        D1{"Is this Identity used only by this agent,<br/>unused everywhere else,<br/>and separately approved for deletion?"}
+        D2["No: keep the Agent Identity"]
+        D3["Yes: delete the Agent Identity"]
+        D4["Read it again;<br/>404 confirms it is gone"]
         D1 -->|No| D2
         D1 -->|Yes| D3
         D3 --> D4
     end
 
-    subgraph PART1["<b>PART 1: BLUEPRINT</b> - retain the binding"]
+    subgraph PART1["<b>PART 1: KEEP THE BLUEPRINT FOR NOW</b>"]
         direction TB
-        C1["Keep the mapped Blueprint;<br/>shared or dedicated retirement<br/>requires a separate lifecycle"]
-        C2["Write the durable tombstone<br/>with assignment and object IDs"]
+        C1["Do not delete the Blueprint here<br/><br/>Shared example: other approved agents may use it<br/>Dedicated example: delete it only in a separate review"]
+        C2["Keep a permanent deletion record<br/>with the old source and object IDs"]
         C1 --> C2
     end
 
@@ -800,23 +816,25 @@ propagation must be established in a bounded experiment before automation.
 ### Rename flow
 
 Rename locks and verifies the existing source mapping before touching any
-object. Part 1 confirms that the assignment and Blueprint binding are
-unchanged; only Parts 2 and 3 change display metadata.
+object. In plain English: prove that this is the same provider agent with a
+new name, then rename the two Agent 365-managed objects without replacing
+them. The Blueprint does not change, whether it is dedicated to this one agent
+or shared by several explicitly approved agents.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
 flowchart TB
-    subgraph DETECT["<b>DETECTION</b> - read only"]
+    subgraph DETECT["<b>PROVE THIS IS ONLY A NAME CHANGE</b> - read only"]
         direction TB
-        A1["Capture the Package,<br/>assignment, and mapped objects"]
-        A2["Rename only the disposable<br/>provider agent"]
-        A3["Wait for healthy sync<br/>and propagation"]
-        A4["Read Package List pages<br/>and Package Details"]
-        A5{"Old and new Package<br/>records coexist?"}
-        A6["Stop for duplication<br/>reconciliation"]
-        A7{"Provider scope and exact<br/>sourceAgentId unchanged?"}
-        A8["Mark reconciliation-required:<br/>migration or replacement"]
-        A9["Update the Package pointer<br/>only if the Package ID changed"]
+        A1["Save the current provider Package<br/>and all mapped Agent 365 objects"]
+        A2["Change only the disposable<br/>provider agent's display name"]
+        A3["Wait for a successful sync<br/>and enough propagation time"]
+        A4["Read every inventory page<br/>and the renamed Package"]
+        A5{"Are both the old and renamed<br/>Packages visible?"}
+        A6["Yes: stop and investigate<br/>a possible duplicate"]
+        A7{"Is it still the same provider agent?<br/>Same platform + scope + provider ID"}
+        A8["No: stop; this may be a moved,<br/>replaced, or recreated agent"]
+        A9["Yes: keep all identity mappings;<br/>update only the Package ID if it changed"]
         A1 --> A2
         A2 --> A3
         A3 --> A4
@@ -827,31 +845,31 @@ flowchart TB
         A7 -->|Yes| A9
     end
 
-    subgraph GATE["<b>VERIFICATION GATE</b> - nothing is written yet"]
+    subgraph GATE["<b>FINAL SAFETY CHECK</b> - nothing is written yet"]
         direction TB
-        B1["GET the mapped Agent Identity<br/>and companion Registration"]
-        B2{"Display-name update<br/>approved?"}
-        B3["Keep both companion<br/>objects unchanged"]
+        B1["Read the saved Agent Identity<br/>and companion Registration"]
+        B2{"Is renaming these two<br/>Agent 365 objects approved?"}
+        B3["No: keep both objects unchanged"]
         B1 --> B2
         B2 -->|No| B3
     end
 
-    subgraph PART1["<b>PART 1: BLUEPRINT</b> - no write"]
+    subgraph PART1["<b>PART 1: KEEP THE SAME BLUEPRINT</b>"]
         direction TB
-        C1["Confirm assignmentMode,<br/>blueprintGroup, Blueprint,<br/>and principal are unchanged"]
+        C1["Verify the saved Blueprint and sign-in object<br/><br/>Dedicated example: only this agent uses it<br/>Shared example: other approved agents also use it"]
     end
 
-    subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - rename"]
+    subgraph PART2["<b>PART 2: RENAME THE AGENT IDENTITY</b>"]
         direction TB
-        D1["PATCH the Agent Identity<br/>displayName"]
-        D2["GET and verify the same<br/>Identity and Blueprint IDs"]
+        D1["Change only the<br/>Agent Identity display name"]
+        D2["Read it again and confirm<br/>the Identity and Blueprint IDs did not change"]
         D1 --> D2
     end
 
-    subgraph PART3["<b>PART 3: COMPANION REGISTRATION</b> - rename"]
+    subgraph PART3["<b>PART 3: RENAME THE COMPANION REGISTRATION</b>"]
         direction TB
-        E1["PATCH the Registration<br/>displayName"]
-        E2["GET and verify the same<br/>Registration, source,<br/>Blueprint, and Identity IDs"]
+        E1["Change only the Registration display name<br/>and provider modified time"]
+        E2["Read it again and confirm<br/>all saved IDs stayed the same"]
         E1 --> E2
     end
 
@@ -859,8 +877,8 @@ flowchart TB
     B2 -->|Yes| C1
     C1 --> D1
     D2 --> E1
-    E2 --> F1["Re-read Package inventory<br/>and observe propagation"]
-    F1 --> F2["Persist the rename result<br/>in the durable mapping"]
+    E2 --> F1["Read inventory again and check<br/>whether the companion Package name followed"]
+    F1 --> F2["Save the final names, unchanged IDs,<br/>and rename result in the mapping"]
 
     style DETECT fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
     style GATE fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b

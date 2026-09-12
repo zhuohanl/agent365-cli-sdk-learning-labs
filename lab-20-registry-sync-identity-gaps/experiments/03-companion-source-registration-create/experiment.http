@@ -21,7 +21,7 @@
 # A365_EXP3_SOURCE_CREATED_AT=<exact-source-created-timestamp>
 # A365_EXP3_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp>
 # A365_EXP3_BLUEPRINT_GROUP=<approved-disposable-platform-group-label>
-# A365_EXP3_CREATED_REGISTRATION_ID_PATH=<leave-empty-until-Step-3.11>
+# A365_EXP3_CREATED_REGISTRATION_ID_PATH=<leave-empty-until-Step-3.12>
 # A365_EXP3_CREATED_PACKAGE_ID=<leave-empty-until-Step-3.13>
 #
 # Evidence belongs only under:

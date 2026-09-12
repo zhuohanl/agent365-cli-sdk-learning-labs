@@ -19,6 +19,8 @@ DEFAULT_EVIDENCE = LAB / "evidence" / "demos" / "01-add-companion"
 PLATFORM = "GoogleVertexAI"
 COMPANION_PREFIX = "agent-governance:companion:v1:gcp:"
 ASSIGNMENT_MODE = "dedicated"
+LAB_GROUPING_POLICY_VERSION = "lab-20-dedicated-default-v1"
+LAB_APPROVAL_REFERENCE = "lab-20-disposable-demo-gate"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -42,13 +44,18 @@ def read_env(path: Path) -> dict[str, str]:
 def update_env(path: Path, updates: dict[str, str]) -> None:
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     remaining = dict(updates)
+    updated_keys: set[str] = set()
     updated: list[str] = []
 
     for line in lines:
         match = re.match(r"(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)=(.*)$", line)
-        if match and match.group(2) in remaining:
+        if match and match.group(2) in updates:
             key = match.group(2)
-            updated.append(f"{match.group(1)}{key}{match.group(3)}={remaining.pop(key)}")
+            if key in updated_keys:
+                continue
+            updated.append(f"{match.group(1)}{key}{match.group(3)}={updates[key]}")
+            updated_keys.add(key)
+            remaining.pop(key, None)
         else:
             updated.append(line)
 
@@ -169,24 +176,16 @@ def source_values(package: dict[str, Any], target_name: str) -> dict[str, str]:
 
 def assignment_values(env: dict[str, str], provider_source: str) -> dict[str, str]:
     tenant_id = env.get("A365_TENANT_ID", "")
-    policy_version = env.get("A365_DEMO_GROUPING_POLICY_VERSION", "")
-    approval_reference = env.get("A365_DEMO_APPROVAL_REFERENCE", "")
     if not tenant_id:
         raise ValueError("Set A365_TENANT_ID before preparing the assignment")
-    if not policy_version:
-        raise ValueError(
-            "Set A365_DEMO_GROUPING_POLICY_VERSION before preparing the assignment"
-        )
-    if not approval_reference:
-        raise ValueError(
-            "Set A365_DEMO_APPROVAL_REFERENCE before preparing the assignment"
-        )
 
     canonical_key = f"{tenant_id}|{PLATFORM}|{provider_source}"
     digest = hashlib.sha256(canonical_key.encode("utf-8")).hexdigest()[:16]
     return {
         "A365_DEMO_ASSIGNMENT_MODE": ASSIGNMENT_MODE,
         "A365_DEMO_BLUEPRINT_GROUP": f"dedicated-gcp-{digest}",
+        "A365_DEMO_GROUPING_POLICY_VERSION": LAB_GROUPING_POLICY_VERSION,
+        "A365_DEMO_APPROVAL_REFERENCE": LAB_APPROVAL_REFERENCE,
     }
 
 
@@ -209,20 +208,25 @@ def blueprint_values(
     }
 
 
-def registration_values(registration: dict[str, Any]) -> dict[str, str]:
+def registration_values(
+    registration: dict[str, Any], provider_source: str
+) -> dict[str, str]:
     registration_id = registration.get("id")
     source_agent_id = registration.get("sourceAgentId")
     if not isinstance(registration_id, str) or not registration_id:
         raise ValueError("Registration response has no id")
-    if not isinstance(source_agent_id, str) or not source_agent_id:
-        raise ValueError("Registration response has no sourceAgentId")
-    return {
-        "A365_DEMO_COMPANION_SOURCE_AGENT_ID": source_agent_id,
+    values = {
         "A365_DEMO_COMPANION_REGISTRATION_ID": registration_id,
         "A365_DEMO_COMPANION_REGISTRATION_ID_PATH": quote(
             registration_id, safe=""
         ),
     }
+    if source_agent_id is not None:
+        expected_source = COMPANION_PREFIX + provider_source
+        if source_agent_id != expected_source:
+            raise ValueError("Registration source does not match the selected Package")
+        values["A365_DEMO_COMPANION_SOURCE_AGENT_ID"] = source_agent_id
+    return values
 
 
 def mapping_values(
@@ -231,12 +235,14 @@ def mapping_values(
     principal: dict[str, Any],
     identity: dict[str, Any],
     registration: dict[str, Any],
+    companion_package: dict[str, Any],
 ) -> dict[str, Any]:
     blueprint_object_id = env.get("A365_DEMO_BLUEPRINT_OBJECT_ID", "")
     blueprint_app_id = blueprint.get("appId")
     principal_id = principal.get("id")
     identity_id = identity.get("id")
     registration_id = registration.get("id")
+    companion_package_id = companion_package.get("id")
     provider_source = env.get("A365_DEMO_PROVIDER_SOURCE_AGENT_ID", "")
     expected_assignment = assignment_values(env, provider_source)
 
@@ -270,6 +276,41 @@ def mapping_values(
     ):
         raise ValueError("Registration identity links do not match the created objects")
     if (
+        not companion_package_id
+        or companion_package_id != env.get("A365_DEMO_COMPANION_PACKAGE_ID")
+        or companion_package.get("platform") != PLATFORM
+        or companion_package.get("agentIdentityId") != identity_id
+    ):
+        raise ValueError("Companion Package does not match the mapped identity")
+
+    companion_definitions: list[dict[str, Any]] = []
+    for detail in companion_package.get("elementDetails") or []:
+        if not isinstance(detail, dict):
+            continue
+        for element in detail.get("elements") or []:
+            if not isinstance(element, dict):
+                continue
+            raw_definition = element.get("definition")
+            if not isinstance(raw_definition, str):
+                continue
+            try:
+                definition = json.loads(raw_definition)
+            except json.JSONDecodeError:
+                continue
+            if definition.get("SourceAgentId") == registration.get("sourceAgentId"):
+                companion_definitions.append(definition)
+
+    if len(companion_definitions) != 1:
+        raise ValueError(
+            "Companion Package does not contain one matching source definition"
+        )
+    companion_definition = companion_definitions[0]
+    if (
+        companion_definition.get("AgentIdentityBlueprintId") != blueprint_app_id
+        or companion_definition.get("AgentIdentityId") != identity_id
+    ):
+        raise ValueError("Companion Package identity links do not match the mapping")
+    if (
         env.get("A365_DEMO_ASSIGNMENT_MODE")
         != expected_assignment["A365_DEMO_ASSIGNMENT_MODE"]
         or env.get("A365_DEMO_BLUEPRINT_GROUP")
@@ -289,6 +330,7 @@ def mapping_values(
         "packageId": env["A365_DEMO_ORIGINAL_PACKAGE_ID"],
         "companionSourceAgentId": registration["sourceAgentId"],
         "companionRegistrationId": registration_id,
+        "companionPackageId": companion_package_id,
         "blueprintObjectId": blueprint_object_id,
         "blueprintId": blueprint_app_id,
         "blueprintPrincipalId": principal_id,
@@ -354,17 +396,21 @@ def blueprint_command(args: argparse.Namespace) -> None:
 
 def registration_command(args: argparse.Namespace) -> None:
     env = read_env(args.env)
-    updates = registration_values(load_json(args.registration))
-    expected_source = COMPANION_PREFIX + env.get(
-        "A365_DEMO_PROVIDER_SOURCE_AGENT_ID", ""
-    )
-    if updates["A365_DEMO_COMPANION_SOURCE_AGENT_ID"] != expected_source:
-        raise ValueError("Registration source does not match the selected Package")
+    provider_source = env.get("A365_DEMO_PROVIDER_SOURCE_AGENT_ID", "")
+    if not provider_source:
+        raise ValueError("Prepare the selected Package before the Registration")
+    updates = registration_values(load_json(args.registration), provider_source)
     update_env(args.env, updates)
-    print(
-        "Updated the companion source, raw Registration ID, and path-safe "
-        "Registration ID in the ignored .env"
-    )
+    if "A365_DEMO_COMPANION_SOURCE_AGENT_ID" in updates:
+        print(
+            "Updated the verified companion source, raw Registration ID, "
+            "and path-safe Registration ID"
+        )
+    else:
+        print(
+            "Updated the raw and path-safe Registration IDs; "
+            "verify the Registration next"
+        )
 
 
 def finalize_command(args: argparse.Namespace) -> None:
@@ -379,6 +425,7 @@ def finalize_command(args: argparse.Namespace) -> None:
         "A365_DEMO_APPROVAL_REFERENCE",
         "A365_DEMO_BLUEPRINT_OBJECT_ID",
         "A365_DEMO_BLUEPRINT_APP_ID",
+        "A365_DEMO_COMPANION_PACKAGE_ID",
     )
     missing = [key for key in required_env if not env.get(key)]
     if missing:
@@ -390,6 +437,7 @@ def finalize_command(args: argparse.Namespace) -> None:
         load_json(args.principal),
         load_json(args.identity),
         load_json(args.registration),
+        load_json(args.companion_package),
     )
     updates = {
         "A365_DEMO_BLUEPRINT_APP_ID": mapping["blueprintId"],
@@ -406,7 +454,7 @@ def finalize_command(args: argparse.Namespace) -> None:
     update_env(args.env, updates)
     args.mapping.parent.mkdir(parents=True, exist_ok=True)
     args.mapping.write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
-    print("Saved the ignored durable mapping and updated the three generated IDs")
+    print("Saved the ignored durable mapping and refreshed generated IDs")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -463,6 +511,11 @@ def parser() -> argparse.ArgumentParser:
         "--registration",
         type=Path,
         default=DEFAULT_EVIDENCE / "companion-registration.json",
+    )
+    finalize.add_argument(
+        "--companion-package",
+        type=Path,
+        default=DEFAULT_EVIDENCE / "companion-package-after-create.json",
     )
     finalize.add_argument(
         "--mapping", type=Path, default=DEFAULT_EVIDENCE / "mapping.json"

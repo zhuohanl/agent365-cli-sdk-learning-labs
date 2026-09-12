@@ -100,6 +100,11 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.1
+#
+# Do not save this response. The operator ID is used only by the live session.
+
+###############################################################################
 # Part 1.2 - Capture Package inventory before the provider rename
 #
 # Expected: 200. Read every returned page before continuing. Locate the
@@ -112,6 +117,14 @@ Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.2
+#
+# 1. Save the first page:
+# ../../evidence/demos/02-rename-companion/package-list-before-provider-rename-page-1.json
+# 2. If @odata.nextLink exists, save every additional page as
+#    package-list-before-provider-rename-page-2.json, page-3.json, and so on.
 
 ###############################################################################
 # Part 1.3 - Capture the original Package before the provider rename
@@ -134,6 +147,12 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.3
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/original-package-before-provider-rename.json
+
+###############################################################################
 # Part 1.4 - Verify the mapped Blueprint
 #
 # Expected: 200. Confirm its object ID and appId match the locked assignment.
@@ -144,6 +163,12 @@ Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.4
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-before-rename.json
 
 ###############################################################################
 # Part 1.5 - Verify the enabled Blueprint principal
@@ -159,6 +184,12 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.5
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-before-rename.json
+
+###############################################################################
 # Part 1.6 - Capture the existing Agent Identity
 #
 # Expected: 200. Record only field presence and safe comparison results in
@@ -170,6 +201,12 @@ Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.6
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/agent-identity-before-rename.json
 
 ###############################################################################
 # Part 1.7 - Capture the existing companion Registration
@@ -190,6 +227,12 @@ Accept: application/json
 OData-Version: 4.0
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.7
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-registration-before-rename.json
 
 ###############################################################################
 # Manual provider checkpoint - no request
@@ -222,6 +265,16 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 2.1
+#
+# 1. Save the first page:
+# ../../evidence/demos/02-rename-companion/package-list-after-provider-rename-page-1.json
+# 2. If @odata.nextLink exists, save every additional page as
+#    package-list-after-provider-rename-page-2.json, page-3.json, and so on.
+# 3. Set A365_RENAME_AFTER_PACKAGE_ID only after locating exactly one Package
+#    with the expected platform, provider scope, and unchanged sourceAgentId.
+
+###############################################################################
 # Part 2.2 - Read the selected Package after provider rename and sync
 #
 # Expected: 200 after A365_RENAME_AFTER_PACKAGE_ID is set.
@@ -234,6 +287,15 @@ Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 2.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/provider-package-after-rename.json
+#
+# Copy the exact nested LastModifiedDateTime into
+# A365_RENAME_SOURCE_MODIFIED_AT before continuing to Stop A.
 
 ###############################################################################
 # Stop A - classify before sending any PATCH
@@ -278,6 +340,13 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 3.1
+#
+# A successful 204 has no JSON response body. Do not create a fake JSON
+# response file. Continue immediately to Part 3.2, which preserves the
+# verified post-PATCH state.
+
+###############################################################################
 # Part 3.2 - Verify the Agent Identity rename
 #
 # Expected: 200 with the same ID and Blueprint appId, and the new displayName.
@@ -288,6 +357,15 @@ Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 3.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/agent-identity-after-rename.json
+#
+# Confirm the ID and Blueprint appId match
+# agent-identity-before-rename.json before continuing.
 
 ###############################################################################
 # Part 3.3 - OPTIONAL rename of the existing companion Registration
@@ -314,6 +392,13 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 3.3
+#
+# A successful 200 has an empty response body. Do not create a fake JSON
+# response file. Continue immediately to Part 3.4, which preserves the
+# verified post-PATCH state.
+
+###############################################################################
 # Part 3.4 - Verify the companion Registration rename
 #
 # Expected: 200 with the same Registration ID, sourceAgentId, Blueprint ID,
@@ -328,6 +413,15 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 3.4
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-registration-after-rename.json
+#
+# Confirm the Registration ID, sourceAgentId, Blueprint ID, Agent Identity ID,
+# and owners match companion-registration-before-rename.json.
+
+###############################################################################
 # Part 3.5 - Observe Package propagation after companion rename
 #
 # Expected: 200. Do not assume the companion Package display name changes
@@ -339,6 +433,16 @@ Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 3.5
+#
+# 1. Save the first page:
+# ../../evidence/demos/02-rename-companion/package-list-after-companion-rename-page-1.json
+# 2. If @odata.nextLink exists, save every additional page as
+#    package-list-after-companion-rename-page-2.json, page-3.json, and so on.
+# 3. Record whether the mapped companion Package name is updated, delayed, or
+#    unchanged. Do not infer the result from the provider Package.
 
 ###############################################################################
 # Rename result checkpoint - no request
@@ -376,9 +480,34 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 4.2 - OPTIONAL rollback of companion Registration display name
+# REQUIRED AFTER PART 4.1
 #
-# Run only after Part 4.1 succeeds and is verified. Expected: 200.
+# A successful 204 has no JSON response body. Do not create a fake JSON
+# response file. Verify the rollback with Part 4.2.
+
+###############################################################################
+# Part 4.2 - Verify the Agent Identity rollback
+#
+# Expected: 200 with the original displayName and unchanged ID and Blueprint.
+
+# @name renameGetIdentityAfterRollback
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/agent-identity-after-rollback.json
+
+###############################################################################
+# Part 4.3 - OPTIONAL rollback of companion Registration display name
+#
+# Run only after Part 4.2 verifies the Identity rollback. Expected: 200 with
+# an empty response body.
 
 # @name renameRollbackRegistration
 PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
@@ -390,3 +519,31 @@ OData-Version: 4.0
 {
   "displayName": "{{oldTargetName}} - managed companion"
 }
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.3
+#
+# A successful 200 has an empty response body. Do not create a fake JSON
+# response file. Verify the rollback with Part 4.4.
+
+###############################################################################
+# Part 4.4 - Verify the companion Registration rollback
+#
+# Expected: 200 with the original displayName and unchanged Registration,
+# source, Blueprint, Agent Identity, and owner fields.
+
+# @name renameGetRegistrationAfterRollback
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.4
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-registration-after-rollback.json

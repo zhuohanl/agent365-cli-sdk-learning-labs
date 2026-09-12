@@ -58,22 +58,21 @@ Delete is last because it removes the Registration required by the rename
 demo. Each demo remains gated and can instead use a different explicitly
 approved disposable agent selected through `.env`.
 
-Before demo 01, provide the exact GCP Package display name and the standing
-dedicated-onboarding policy metadata:
+Before demo 01, provide only the exact GCP Package display name:
 
 ```dotenv
 A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
-A365_DEMO_GROUPING_POLICY_VERSION=<approved-standing-policy-version>
-A365_DEMO_APPROVAL_REFERENCE=<approved-standing-policy-reference>
 ```
 
 After Package discovery, the helper generates a deterministic dedicated
-assignment and `A365_DEMO_BLUEPRINT_GROUP`. Reconcile that exact group against
-protected local mapping. Set `A365_DEMO_BLUEPRINT_OBJECT_ID` only when the
-mapping identifies its existing Blueprint; otherwise leave it empty. Demo 01
-then follows the Experiment 03 order: Blueprint and principal, Agent Identity,
-companion Registration, Registration readback, and independent reads of the
-original and companion Packages.
+assignment, `A365_DEMO_BLUEPRINT_GROUP`, and fixed experiment-only policy
+metadata. The operator does not invent or supply policy-version or
+approval-reference values. Reconcile that exact group against protected local
+mapping. Set `A365_DEMO_BLUEPRINT_OBJECT_ID` only when the mapping identifies
+its existing Blueprint; otherwise leave it empty. Demo 01 then follows the
+Experiment 03 order: Blueprint and principal, Agent Identity, companion
+Registration, Registration readback, and independent reads of the original
+and companion Packages.
 
 The `demos/01-add-companion/prepare_demo.py` helper derives Package and source
 values from saved read-only responses, generates the dedicated assignment, and

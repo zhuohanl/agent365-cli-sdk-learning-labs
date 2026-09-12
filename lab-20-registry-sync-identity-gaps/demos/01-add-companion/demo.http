@@ -1,14 +1,17 @@
 # Lab 20: Add one companion for a selected GCP agent
 #
-# This demo requires one selected source and the standing onboarding policy
-# metadata before it starts:
+# This demo requires only one selected source before it starts:
 #
 # A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
-# A365_DEMO_GROUPING_POLICY_VERSION=<approved-standing-policy-version>
-# A365_DEMO_APPROVAL_REFERENCE=<approved-standing-policy-reference>
 #
 # The helper generates a deterministic dedicated Blueprint group after reading
-# the selected Package. Do not invent or copy a group from another source.
+# the selected Package. It also records fixed, experiment-only grouping policy
+# and approval-reference values for the ignored mapping. These values document
+# the Lab 20 disposable-object gate; they are not external approvals.
+#
+# Do not set A365_DEMO_GROUPING_POLICY_VERSION or
+# A365_DEMO_APPROVAL_REFERENCE yourself. The helper generates both
+# experiment-only values. Do not invent or copy a group from another source.
 # A365_DEMO_BLUEPRINT_OBJECT_ID remains empty unless protected local mapping
 # already identifies the Blueprint bound to that generated assignment.
 #
@@ -20,12 +23,9 @@
 # Before Prep 1, open ../../.env and set:
 #
 # A365_DEMO_TARGET_NAME=<exact displayName of the selected GCP agent>
-# A365_DEMO_GROUPING_POLICY_VERSION=<approved-standing-policy-version>
-# A365_DEMO_APPROVAL_REFERENCE=<approved-standing-policy-reference>
 #
 # Choose the GCP agent in advance and copy its name exactly, including spaces
-# and capitalization. The policy inputs authorize the dedicated-default
-# assignment; they do not grant runtime permissions.
+# and capitalization.
 #
 # The helper derives the Package ID, exact provider source ID, and source
 # timestamps from read-only Package responses. The create responses supply the
@@ -65,14 +65,13 @@
 @targetName = {{$dotenv A365_DEMO_TARGET_NAME}}
 @assignmentMode = {{$dotenv A365_DEMO_ASSIGNMENT_MODE}}
 @blueprintGroup = {{$dotenv A365_DEMO_BLUEPRINT_GROUP}}
-@groupingPolicyVersion = {{$dotenv A365_DEMO_GROUPING_POLICY_VERSION}}
-@approvalReference = {{$dotenv A365_DEMO_APPROVAL_REFERENCE}}
 @blueprintObjectId = {{$dotenv A365_DEMO_BLUEPRINT_OBJECT_ID}}
 @blueprintAppId = {{$dotenv A365_DEMO_BLUEPRINT_APP_ID}}
 @originalPackageId = {{$dotenv A365_DEMO_ORIGINAL_PACKAGE_ID}}
 @providerSourceAgentId = {{$dotenv A365_DEMO_PROVIDER_SOURCE_AGENT_ID}}
 @sourceCreatedAt = {{$dotenv A365_DEMO_SOURCE_CREATED_AT}}
 @sourceModifiedAt = {{$dotenv A365_DEMO_SOURCE_MODIFIED_AT}}
+@companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
 @companionRegistrationIdPath = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID_PATH}}
 @companionPackageId = {{$dotenv A365_DEMO_COMPANION_PACKAGE_ID}}
 @graphBaseUrl = https://graph.microsoft.com
@@ -123,28 +122,7 @@ Accept: application/json
 ###############################################################################
 # Discovery 1 - Read the complete inventory and select one GCP Package
 #
-# Expected: 200. Save this response as:
-#
-# ../../evidence/demos/01-add-companion/package-list.json
-#
-# In most cases, this is the only file needed. Check the saved response for
-# @odata.nextLink:
-#
-# - If @odata.nextLink is absent, the list is complete. Run:
-#
-# python demos/01-add-companion/prepare_demo.py select
-#
-# - If @odata.nextLink is present, the server has split the Package list into
-#   pages. Send a GET request to that exact URL, save the response as
-#   package-list-2.json, and repeat until the latest response has no
-#   @odata.nextLink. Then pass every saved page to the helper, for example:
-#
-# python demos/01-add-companion/prepare_demo.py select --package-list evidence/demos/01-add-companion/package-list.json evidence/demos/01-add-companion/package-list-2.json
-#
-# The helper requires exactly one GoogleVertexAI Package whose displayName
-# equals A365_DEMO_TARGET_NAME. It first prints safe Package counts grouped by
-# returned platform, then writes only
-# A365_DEMO_ORIGINAL_PACKAGE_ID to the ignored .env and prints no identifier.
+# Expected: 200.
 
 # @name demoListPackages
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
@@ -154,34 +132,26 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER DISCOVERY 1 - SAVE THE RESPONSE BEFORE CONTINUING
+#
+# 1. Save: ../../evidence/demos/01-add-companion/package-list.json
+# 2. If there is no @odata.nextLink, run:
+# python demos/01-add-companion/prepare_demo.py select
+#
+# 3. If @odata.nextLink exists, save each additional page as
+#    package-list-2.json, package-list-3.json, and so on, then run:
+# python demos/01-add-companion/prepare_demo.py select --package-list evidence/demos/01-add-companion/package-list.json evidence/demos/01-add-companion/package-list-2.json
+#
+# Result: the helper writes A365_DEMO_ORIGINAL_PACKAGE_ID to the ignored .env.
+#
+###############################################################################
 # Discovery 2 - Read and parse the selected Package
 #
 # Restart or reload REST Client after the helper changes .env if this request
 # still shows an unresolved originalPackageId.
 #
 # Expected: 200. Confirm displayName is A365_DEMO_TARGET_NAME and platform is
-# GoogleVertexAI. Save the response as:
-#
-# ../../evidence/demos/01-add-companion/package-details.json
-#
-# Then run:
-#
-# python demos/01-add-companion/prepare_demo.py prepare
-#
-# The helper parses the nested definition JSON and writes these generated
-# values to the ignored .env:
-#
-# - A365_DEMO_ORIGINAL_PACKAGE_ID
-# - A365_DEMO_PROVIDER_SOURCE_AGENT_ID
-# - A365_DEMO_SOURCE_CREATED_AT
-# - A365_DEMO_SOURCE_MODIFIED_AT
-# - A365_DEMO_ASSIGNMENT_MODE=dedicated
-# - A365_DEMO_BLUEPRINT_GROUP=<deterministic-single-member-group>
-#
-# It rejects a non-GCP Package, a name mismatch, multiple source definitions,
-# a missing source timestamp, or an original Package that already has an
-# Agent Identity. It derives the group from the tenant, platform, and exact
-# provider source key rather than from the display name.
+# GoogleVertexAI.
 
 # @name demoGetSelectedPackage
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
@@ -189,6 +159,17 @@ Authorization: Bearer {{demoToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER DISCOVERY 2 - SAVE THE RESPONSE BEFORE CONTINUING
+#
+# 1. Save: ../../evidence/demos/01-add-companion/package-details.json
+#    Do not overwrite package-list.json.
+# 2. Run:
+# python demos/01-add-companion/prepare_demo.py prepare
+#
+# Result: the helper writes the provider source, source timestamps, dedicated
+# assignment, Blueprint group, and Lab policy metadata to the ignored .env.
 
 ###############################################################################
 # Assignment checkpoint - reconcile the generated dedicated assignment
@@ -204,21 +185,26 @@ Accept: application/json
 ###############################################################################
 # Part 1.1A - Reuse the Blueprint bound to this assignment
 #
-# Use this branch only when A365_DEMO_BLUEPRINT_OBJECT_ID came from protected
-# local mapping for this exact tenant/A365_DEMO_BLUEPRINT_GROUP binding.
-# Expected: 200. A 403, 404, or mismatch is a stop condition; it is not
-# permission to create a replacement.
+# This request is disabled by default because an empty ID can be normalized
+# into a Blueprint collection query that misleadingly returns 200.
 #
-# Save a successful response as:
+# Use this branch only when A365_DEMO_BLUEPRINT_OBJECT_ID came from protected
+# local mapping for this exact tenant/A365_DEMO_BLUEPRINT_GROUP binding. Then
+# uncomment the GET and its two headers below.
+#
+# Expected: 200 with top-level `id` and `appId`. A response containing a
+# top-level `value` array is a collection response and must not be saved or
+# treated as a reusable Blueprint. A 403, 404, or mismatch is a stop condition;
+# it is not permission to create a replacement.
+#
+# Save a valid single-object response as:
 #
 # ../../evidence/demos/01-add-companion/blueprint.json
-#
-# Skip this request when A365_DEMO_BLUEPRINT_OBJECT_ID is empty.
 
 # @name demoGetExistingBlueprint
-GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
-Authorization: Bearer {{demoToken.response.body.$.access_token}}
-Accept: application/json
+# GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+# Authorization: Bearer {{demoToken.response.body.$.access_token}}
+# Accept: application/json
 
 ###
 
@@ -240,9 +226,7 @@ Accept: application/json
 #
 # DO NOT SEND THIS REQUEST until Stop 1A is satisfied.
 # Expected: 201. On timeout, 5xx, or another unexpected response, stop and do
-# not retry. Save a successful response as:
-#
-# ../../evidence/demos/01-add-companion/blueprint.json
+# not retry.
 
 # @name demoCreateBlueprint
 POST {{graphBaseUrl}}/v1.0/applications/microsoft.graph.agentIdentityBlueprint
@@ -263,10 +247,18 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Part 1.2 - Resolve one Blueprint result into local state
+# REQUIRED AFTER PART 1.1B
 #
-# After either Part 1.1A or Part 1.1B succeeds, save that one response as
-# blueprint.json and run from the Lab 20 directory:
+# 1. Save the create response:
+# ../../evidence/demos/01-add-companion/blueprint-create-response.json
+# 2. Run:
+# python demos/01-add-companion/prepare_demo.py blueprint --blueprint evidence/demos/01-add-companion/blueprint-create-response.json
+
+###############################################################################
+# Part 1.2 - Resolve a reused Blueprint into local state
+#
+# Run this default command only when Part 1.1A returned a reusable Blueprint
+# already saved as blueprint.json:
 #
 # python demos/01-add-companion/prepare_demo.py blueprint
 #
@@ -280,7 +272,7 @@ Accept: application/json
 ###############################################################################
 # Part 1.3 - Re-read the resolved Blueprint
 #
-# Expected: 200. Overwrite blueprint.json with this verified response.
+# Expected: 200.
 
 # @name demoGetBlueprint
 GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
@@ -288,6 +280,12 @@ Authorization: Bearer {{demoToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.3
+#
+# Save, replacing any earlier copy:
+# ../../evidence/demos/01-add-companion/blueprint.json
 
 ###############################################################################
 # Part 1.4 - Look for the matching Blueprint principal
@@ -301,6 +299,12 @@ Authorization: Bearer {{demoToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.4
+#
+# Save the 200 or 404 JSON response:
+# ../../evidence/demos/01-add-companion/blueprint-principal-before-create.json
 
 ###############################################################################
 # Stop 1B - Approve creation of the Blueprint principal
@@ -329,13 +333,17 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.5
+#
+# Save the 201 response:
+# ../../evidence/demos/01-add-companion/blueprint-principal-create-response.json
+
+###############################################################################
 # Part 1.6 - Verify the Blueprint principal
 #
 # Run after either an existing principal returned 200 or Part 1.5 returned 201.
 # Expected: 200. Confirm appId equals A365_DEMO_BLUEPRINT_APP_ID and
-# accountEnabled is not false. Save the response as:
-#
-# ../../evidence/demos/01-add-companion/blueprint-principal.json
+# accountEnabled is not false.
 
 # @name demoVerifyBlueprintPrincipal
 GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
@@ -343,6 +351,12 @@ Authorization: Bearer {{demoToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.6
+#
+# Save the verified response:
+# ../../evidence/demos/01-add-companion/blueprint-principal.json
 
 ###############################################################################
 # Stop 2 - Approve one Agent Identity creation
@@ -362,9 +376,6 @@ Accept: application/json
 #
 # Expected: 201. The signed-in operator is the required sponsor.
 # On timeout, 5xx, or another unexpected response, stop and do not retry.
-# Save a successful response as:
-#
-# ../../evidence/demos/01-add-companion/agent-identity.json
 
 # @name demoCreateAgentIdentity
 POST {{graphBaseUrl}}/v1.0/servicePrincipals/microsoft.graph.agentIdentity
@@ -383,14 +394,16 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 2.1
+#
+# Save the 201 response:
+# ../../evidence/demos/01-add-companion/agent-identity-create-response.json
+
+###############################################################################
 # Part 2.2 - Verify the created Agent Identity
 #
 # Run only after Part 2.1 returned 201.
-# Expected: 200. Overwrite agent-identity.json with this verified response.
-# Confirm:
-# - id is unchanged from the POST response;
-# - agentIdentityBlueprintId equals the Blueprint appId; and
-# - servicePrincipalType is ServiceIdentity.
+# Expected: 200.
 
 # @name demoGetNewAgentIdentity
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{demoCreateAgentIdentity.response.body.$.id}}/microsoft.graph.agentIdentity
@@ -398,6 +411,13 @@ Authorization: Bearer {{demoToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 2.2
+#
+# Confirm the ID is unchanged, the Blueprint appId matches, and
+# servicePrincipalType is ServiceIdentity. Save the verified response:
+# ../../evidence/demos/01-add-companion/agent-identity.json
 
 ###############################################################################
 # Stop 3 - Approve one companion Registration creation
@@ -423,9 +443,7 @@ Accept: application/json
 # 3. deterministic companion source ID derived from the exact provider source
 #
 # Expected: 201. On timeout, 5xx, or another unexpected response, stop and do
-# not retry. Save a successful response as:
-#
-# ../../evidence/demos/01-add-companion/companion-registration.json
+# not retry.
 
 # @name demoCreateFreshCompanion
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -452,20 +470,19 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
-# Part 3.2 - Persist a path-safe Registration ID
+# REQUIRED AFTER PART 3.1 - SAVE AND PERSIST THE REGISTRATION ID
 #
-# After Part 3.1 succeeds, keep the saved response at
-# companion-registration.json and run:
+# 1. Save:
+# ../../evidence/demos/01-add-companion/companion-registration-create-response.json
+# 2. Run:
+# python demos/01-add-companion/prepare_demo.py registration --registration evidence/demos/01-add-companion/companion-registration-create-response.json
 #
-# python demos/01-add-companion/prepare_demo.py registration
-#
-# The helper writes the exact companion source ID, raw Registration ID, and a
-# separately encoded path-safe Registration ID to the ignored .env. Reload
-# REST Client before the readback.
+# The create response may contain only `id`. The helper writes both the exact
+# raw Registration ID and a separately encoded path-safe ID to the ignored
+# .env. Reload REST Client before the readback.
 #
 # Part 3.3 verifies the created companion. Run it only after Part 3.2 completes.
-# Expected: 200. Overwrite companion-registration.json with this verified
-# response and confirm all three inputs match.
+# Expected: 200.
 
 # @name demoGetNewCompanion
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
@@ -476,24 +493,19 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 3.3
+#
+# Confirm the source, Blueprint, and Agent Identity links match. Save the
+# verified GET response separately:
+# ../../evidence/demos/01-add-companion/companion-registration.json
+#
+# Run the helper again so it validates and persists the returned sourceAgentId:
+# python demos/01-add-companion/prepare_demo.py registration
+
+###############################################################################
 # Observation 1 - List Packages after companion creation
 #
-# Expected: 200. Save the first page as:
-#
-# ../../evidence/demos/01-add-companion/package-list-after-create-page-1.json
-#
-# Save linked pages as page-2.json, page-3.json, and so on. Identify
-# the original Registry Sync Package by its saved Package ID and exact provider
-# source, and identify the companion Package by the exact companion source,
-# Blueprint, and Agent Identity links.
-#
-# Do not assume the companion Package ID equals the Registration ID. Put the
-# observed companion Package ID in:
-#
-# A365_DEMO_COMPANION_PACKAGE_ID=<new-companion-package-id>
-#
-# If it is not visible yet, repeat only this read-only request after the agreed
-# propagation period. Do not create another Registration.
+# Expected: 200.
 
 # @name demoListPackagesAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
@@ -503,13 +515,22 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER OBSERVATION 1
+#
+# 1. Save the first page:
+# ../../evidence/demos/01-add-companion/package-list-after-create-page-1.json
+# 2. Save linked pages as page-2.json, page-3.json, and so on.
+# 3. Identify the companion by its source, Blueprint, and Agent Identity links.
+# 4. Put its Package ID in A365_DEMO_COMPANION_PACKAGE_ID.
+#
+# Do not assume Package ID equals Registration ID. If the companion is not
+# visible, retry only this GET after propagation; do not create another one.
+
+###############################################################################
 # Observation 2 - Re-read the original Registry Sync Package
 #
 # Expected: 200. Confirm the original Package still has no agentIdentityId.
 # A successful companion does not enrich or replace the inventory Package.
-# Save the response as:
-#
-# ../../evidence/demos/01-add-companion/original-package-after-create.json
 
 # @name demoGetOriginalPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
@@ -519,13 +540,16 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER OBSERVATION 2
+#
+# Save:
+# ../../evidence/demos/01-add-companion/original-package-after-create.json
+
+###############################################################################
 # Observation 3 - Read the materialized companion Package
 #
 # Expected: 200 after A365_DEMO_COMPANION_PACKAGE_ID is set. Confirm the
 # companion source, Blueprint, Agent Identity, owner, and platform fields.
-# Save the response as:
-#
-# ../../evidence/demos/01-add-companion/companion-package-after-create.json
 
 # @name demoGetCompanionPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{companionPackageId}}
@@ -535,15 +559,21 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER OBSERVATION 3
+#
+# Save:
+# ../../evidence/demos/01-add-companion/companion-package-after-create.json
+
+###############################################################################
 # Finalize - Persist the mapping for rename and delete
 #
-# After saving the verified Blueprint, Blueprint principal, Agent Identity, and
-# Registration responses at the paths above, run:
+# After saving the verified Blueprint, Blueprint principal, Agent Identity,
+# Registration, and companion Package responses at the paths above, run:
 #
 # python demos/01-add-companion/prepare_demo.py finalize
 #
-# The helper verifies the Blueprint -> Identity -> Registration relationships,
-# saves the ignored durable mapping at:
+# The helper verifies the Blueprint -> Identity -> Registration -> Package
+# relationships and saves the ignored durable mapping at:
 #
 # ../../evidence/demos/01-add-companion/mapping.json
 #
