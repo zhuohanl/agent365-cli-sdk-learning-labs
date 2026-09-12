@@ -22,7 +22,7 @@ lesson in the guided learning path.
 
 | Lab | Question |
 | --- | --- |
-| [Lab 20](lab-20-registry-sync-identity-gaps/INSTRUCTION.md) | Which identity fields and operations are available for third-party Registry Sync inventory records? |
+| [Lab 20](lab-20-registry-sync-identity-gaps/docs/INSTRUCTION.md) | Which identity fields and operations are available for third-party Registry Sync inventory records? |
 
 Lab 20 separates its HTTP correlation work under `trial-1-http-tests/` from
 its notebook identity-association work under `trial-2-jupyter-notebook/`.

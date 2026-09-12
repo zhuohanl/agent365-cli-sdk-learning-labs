@@ -18,16 +18,16 @@ from different angles and do not need to be run together.
 
 1. **Trial 1: HTTP experiments and demos** -
    [`http-experiments.md`](http-experiments.md) is the entry
-   point. It separates four Registry Sync identity experiments, one additional
+   point. It separates five Registry Sync identity experiments, one additional
    interaction-history experiment, and three companion lifecycle demos into
-   independent folders. The first experiment is read-only. Every later write
+   independent folders. Experiments 1 and 6 are read-only. Every later write
    remains behind an explicit stop checkpoint. When the demos use the same
    companion, run add, then rename, then delete; deletion is last because it
    removes the object required by the rename demo. No Python, fixture, or
    hidden matching logic is involved; every HTTP request and response is
    inspected by hand, one step at a time.
 2. **Trial 2: notebook pilot** -
-   [`registry_sync_identity_walkthrough.ipynb`](notebook-pilot/registry_sync_identity_walkthrough.ipynb),
+   [`registry_sync_identity_walkthrough.ipynb`](../notebook-pilot/registry_sync_identity_walkthrough.ipynb),
    an opt-in, explicitly-gated, offline-tested Python walkthrough of the
    full 16-step interim solution documented in
    [`identity-assignment-research.md`](identity-assignment-research.md#best-available-interim-solution-step-by-step),
@@ -49,6 +49,84 @@ The first walkthrough is read-only and uses one existing approved
 non-production GCP sample. It stops after retrieving that package's details.
 It does not create or update a Connected platforms connection, blueprint,
 Agent Identity, package, or agent registration.
+
+## Blueprint inventory report
+
+[`scripts/report_blueprint_inventory.py`](../scripts/report_blueprint_inventory.py)
+is a
+tenant-wide, read-only report that:
+
+1. follows every page from
+   `GET /v1.0/copilot/admin/catalog/packages`;
+2. reads Package Details only when the list entry omits
+   `agentIdentityId`;
+3. resolves every unique Agent Identity's
+   `agentIdentityBlueprintId`, first treating the Package value as the
+   documented service-principal object ID and then trying the supported
+   service-principal `appId` alternate key only after a 404;
+4. resolves the tenant-local Blueprint principal name; and
+5. saves an enriched local Package list containing
+   `resolvedAgentIdentity` and `resolvedBlueprint`; and
+6. prints and saves a Markdown table grouped by Package `platform` and
+   Blueprint.
+
+The count is the number of unique Agent Identities referenced by Packages in
+that platform/Blueprint group. It is not a directory-wide count of every
+possible child identity when no Package references that identity.
+
+Every run writes the enriched Package list to the ignored local file:
+
+```text
+evidence\blueprint-inventory\enriched-packages.json
+```
+
+It also writes the Markdown summary table to:
+
+```text
+evidence\blueprint-inventory\blueprint-summary.md
+```
+
+The table keeps the tenant-local Blueprint principal `displayName` in
+**Blueprint name** and the parent Blueprint application `appId` in
+**Blueprint ID**.
+
+The file retains the Package fields returned by Graph. If the Package List
+entry omits `agentIdentityId`, the script merges its Package Details response
+before adding the resolved objects. Packages without an Agent Identity remain
+in the list with both resolved fields set to `null`.
+
+If a Package references an Agent Identity or Blueprint principal that Graph
+reports as `Request_ResourceNotFound`, the script records that condition in
+`identityResolution` or `blueprintResolution` and continues with the remaining
+Packages. Other Graph failures still stop the report so permission and service
+errors are not hidden.
+
+The public-client app requires approved delegated access for:
+
+```text
+CopilotPackages.Read.All
+AgentIdentity.Read.All
+AgentIdentityBlueprintPrincipal.Read.All
+```
+
+Use the existing ignored `.env` values for `A365_TENANT_ID` and
+`A365_CLIENT_ID`, then run from the Lab 20 directory:
+
+```powershell
+uv run --project notebook-pilot python scripts\report_blueprint_inventory.py
+```
+
+The default command saves both local outputs:
+
+```powershell
+uv run --project notebook-pilot python scripts\report_blueprint_inventory.py
+```
+
+Use `--output <path>` or `--enriched-output <path>` only when a different
+approved ignored local path is needed.
+
+The script uses delegated device-code authentication, performs no writes, and
+does not save its access token.
 
 ## Prerequisites
 
@@ -76,21 +154,58 @@ The repository ignores `.env`. Never put real values into
 the tracked files under `experiments/` or `demos/`,
 tracked Markdown, chat, an issue, or a screenshot.
 
-The fresh-companion customer demo uses additional `A365_DEMO_*` values listed
-at the top of
-[`demos/01-add-companion/demo.http`](demos/01-add-companion/demo.http).
-Keep them in the same ignored `.env`. For the already-created companion, run
-the file's read-only route and skip its Part 3B POST. The installed REST Client
-uses its cached `aadV2Token` helper: the normal route requests only read
-permissions, while the optional POST and DELETE request write permission only
-when sent. The helper opens a browser and handles the token, but its delegated
-flow still uses a device code internally. Use the notebook when an actual
-localhost browser-callback login is required.
+The add-companion demo requires two demo-specific decisions before it starts:
+
+```dotenv
+A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
+A365_DEMO_BLUEPRINT_GROUP=<approved-blueprint-group-label>
+```
+
+The target name is the operator's inventory selection. The Blueprint group is
+the approved credential and governance boundary for the selected source; a
+Registry Sync Package does not carry this relationship, so the demo cannot
+infer it.
+
+Before starting the Add demo, choose the target GCP agent and put its exact
+Package `displayName` in `A365_DEMO_TARGET_NAME` in the ignored Lab 20 `.env`.
+Copy spaces and capitalization exactly. Put the approved Blueprint group label
+in `A365_DEMO_BLUEPRINT_GROUP`.
+
+`A365_DEMO_BLUEPRINT_OBJECT_ID` is optional at the start. Set it only when
+protected local mapping identifies an approved reusable Blueprint for the
+selected group. Otherwise leave it empty. After inventory discovery,
+Part 1 provides separate reuse and approved-creation branches, resolves either
+result through `prepare_demo.py blueprint`, and verifies the Blueprint
+principal before any per-agent object is created.
+
+Follow
+[`demos/01-add-companion/demo.http`](../demos/01-add-companion/demo.http) and use
+its `prepare_demo.py` helper after saving the Package List and Package Details
+responses under ignored evidence. The helper selects exactly one matching GCP
+Package, preserves the encoded provider source ID, extracts the required source
+timestamps, and writes only generated values to the ignored `.env`. After the
+two approved creates, its `finalize` command validates and saves the durable
+Blueprint, Identity, Registration, Package, and source mapping for the rename
+and delete demos.
+
+The Package List is usually one response. Only when a response contains
+`@odata.nextLink` has Microsoft Graph split the list into multiple pages; save
+and pass those additional pages to the helper until the latest response has no
+next link.
+
+Each lifecycle demo follows the same explicit authentication pattern as
+Experiment 1: request a device code, copy the code into the browser sign-in,
+then exchange it for one short-lived token. This keeps tenant and client IDs in
+the ignored `.env`, makes the selected app unambiguous, and avoids multiple
+hidden sign-in dialogs from eagerly resolved `aadV2Token` variables. The token
+contains the permissions needed by the complete lifecycle demo; Stop gates
+still control whether any write request is sent. Never save either
+authentication response.
 
 ## Walkthrough
 
 Open
-[`experiments/01-package-registration-lookup/experiment.http`](experiments/01-package-registration-lookup/experiment.http)
+[`experiments/01-package-registration-lookup/experiment.http`](../experiments/01-package-registration-lookup/experiment.http)
 and run one request at a time:
 
 1. Start device-code authentication.
@@ -103,14 +218,35 @@ and run one request at a time:
 7. Try the Package ID and provider source ID independently as Registration IDs.
 8. Stop and interpret the results before running a write experiment.
 
+To create `A365_SAMPLE_SOURCE_AGENT_ID_PATH`, first copy and run this one-line
+command locally in PowerShell:
+
+```powershell
+[uri]::EscapeDataString((Read-Host 'Paste SourceAgentId').Trim()) | Set-Clipboard
+```
+
+When the prompt appears, copy the exact encoded `SourceAgentId` from the
+ignored Package Details response, paste it into PowerShell, and press Enter.
+The converted value is then placed on the clipboard and can be pasted into the
+ignored `.env`; it is not printed to the terminal. This order matters because
+copying the command itself replaces the previous clipboard contents. An
+existing `%2F` becomes `%252F`, which prevents REST Client from splitting the
+identifier into multiple URL path segments.
+
+For understanding URL encoding with synthetic values, use CyberChef's public
+[URL Encode operation](https://gchq.github.io/CyberChef/#help=URL_Encode).
+Never paste a real provider source ID, Package ID, tenant value, or other
+experiment identifier into a public website. Use the local PowerShell method
+for real evidence.
+
 After completing that supported inventory walkthrough, use
-[`undocumented-collection-probe.http`](experiments/01-package-registration-lookup/undocumented-collection-probe.http)
+[`undocumented-collection-probe.http`](../experiments/01-package-registration-lookup/undocumented-collection-probe.http)
 only for the separate,
 read-only negative probe of the undocumented registration collection endpoint.
 That probe requires delegated `AgentRegistration.Read.All`.
 
 The disposable correlation experiment is defined in
-[`experiments/02-provider-source-registration-create/experiment.http`](experiments/02-provider-source-registration-create/experiment.http).
+[`experiments/02-provider-source-registration-create/experiment.http`](../experiments/02-provider-source-registration-create/experiment.http).
 It first creates a registration with the same provider-native `SourceAgentId`
 but no identity fields. Run the create request only once and stop immediately
 after recording its response.
@@ -162,7 +298,7 @@ complete:
 
 ## Notebook walkthrough (opt-in control-plane pilot)
 
-[`registry_sync_identity_walkthrough.ipynb`](notebook-pilot/registry_sync_identity_walkthrough.ipynb)
+[`registry_sync_identity_walkthrough.ipynb`](../notebook-pilot/registry_sync_identity_walkthrough.ipynb)
 is a separate, **opt-in control-plane pilot** based on the interim solution in
 [`identity-assignment-research.md`](identity-assignment-research.md), with all
 logic in the notebook. There is no separate workflow class or Python module.
@@ -175,7 +311,7 @@ synchronized package and **not** a runtime-enforcement mechanism.
 ### Setup
 
 From the repository root, enter the lab and create the environment using
-[`pyproject.toml`](notebook-pilot/pyproject.toml) (Python >=3.12;
+[`pyproject.toml`](../notebook-pilot/pyproject.toml) (Python >=3.12;
 `requests`, `msal`,
 `ipykernel`; test extras `nbformat`, `nbclient`). The project declares
 `[tool.uv] package = false`, so use `uv sync`, not an editable
@@ -344,7 +480,7 @@ authorization check passed, that the identity fields caused the failure, or
 that the POST made no change.
 
 Use
-[`registration-identity-replay-template.http`](notebook-pilot/registration-identity-replay-template.http)
+[`registration-identity-replay-template.http`](../notebook-pilot/registration-identity-replay-template.http)
 as an export template, not as a request to send directly. The current notebook
 helper retains the most recent unexpected HTTP response as `failed_response`
 in kernel memory. Immediately after the failed Part 3.2 request, run this

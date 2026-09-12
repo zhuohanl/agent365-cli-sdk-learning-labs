@@ -3,8 +3,9 @@
 # Question:
 # Can one separately managed Agent Registration be created with:
 # - a deterministic companion source ID distinct from the provider source ID;
-# - an existing Blueprint app ID; and
-# - an existing Agent Identity ID;
+# - a newly created disposable platform Blueprint;
+# - its enabled Blueprint principal; and
+# - a newly created Agent Identity;
 # while the original Registry Sync Package remains unchanged?
 #
 # The earlier GCP experiment returned 201 and successful readback. This file
@@ -19,9 +20,9 @@
 # A365_EXP3_PROVIDER_SOURCE_AGENT_ID=<exact-provider-source-agent-id>
 # A365_EXP3_SOURCE_CREATED_AT=<exact-source-created-timestamp>
 # A365_EXP3_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp>
-# A365_EXP3_BLUEPRINT_OBJECT_ID=<blueprint-application-object-id>
-# A365_EXP3_BLUEPRINT_APP_ID=<blueprint-app-id>
-# A365_EXP3_AGENT_IDENTITY_ID=<agent-identity-object-id>
+# A365_EXP3_BLUEPRINT_GROUP=<approved-disposable-platform-group-label>
+# A365_EXP3_CREATED_REGISTRATION_ID_PATH=<leave-empty-until-Step-3.11>
+# A365_EXP3_CREATED_PACKAGE_ID=<leave-empty-until-Step-3.13>
 #
 # Evidence belongs only under:
 # ../../evidence/experiments/03-companion-source-registration-create/
@@ -35,16 +36,16 @@
 @providerSourceAgentId = {{$dotenv A365_EXP3_PROVIDER_SOURCE_AGENT_ID}}
 @sourceCreatedAt = {{$dotenv A365_EXP3_SOURCE_CREATED_AT}}
 @sourceModifiedAt = {{$dotenv A365_EXP3_SOURCE_MODIFIED_AT}}
-@blueprintObjectId = {{$dotenv A365_EXP3_BLUEPRINT_OBJECT_ID}}
-@blueprintAppId = {{$dotenv A365_EXP3_BLUEPRINT_APP_ID}}
-@agentIdentityId = {{$dotenv A365_EXP3_AGENT_IDENTITY_ID}}
+@blueprintGroup = {{$dotenv A365_EXP3_BLUEPRINT_GROUP}}
+@createdRegistrationIdPath = {{$dotenv A365_EXP3_CREATED_REGISTRATION_ID_PATH}}
+@createdPackageId = {{$dotenv A365_EXP3_CREATED_PACKAGE_ID}}
 @graphBaseUrl = https://graph.microsoft.com
-@experimentScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@experimentScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Create%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Create%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Create.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
 
 ###############################################################################
 # Step 3.1 - Authenticate
 #
-# DO NOT SAVE either authentication response.
+# DO NOT SAVE either authentication response or the /me response.
 
 # @name exp3DeviceCode
 POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
@@ -72,9 +73,53 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Step 3.2 - Read-only preflight
+# Step 3.2 - List inventory and select one GCP Package
 #
-# SAVE REQUIRED: Package response as package-before-create.json.
+# Expected: 200. Save the first response as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/package-list-page-1.json
+#
+# If @odata.nextLink is present, send a GET to that exact URL and save later
+# responses as package-list-page-2.json, package-list-page-3.json, and so on
+# until the latest response has no @odata.nextLink.
+#
+# Across all saved pages, select exactly one approved, disposable Package with:
+# - platform equal to GoogleVertexAI;
+# - Connected Platform source metadata; and
+# - no existing or unresolved companion mapping.
+#
+# Copy its values into the shared ignored ../../.env:
+#
+# A365_EXP3_TARGET_NAME=<exact-selected-package-displayName>
+# A365_EXP3_PACKAGE_ID=<exact-selected-package-id>
+#
+# Save .env and reload REST Client before Step 3.3. Do not select by name alone
+# when duplicate display names exist.
+
+# @name exp3ListPackages
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3.3 - Read the selected Package Details
+#
+# Expected: 200. Before copying any value, save the complete response as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/package-before-create.json
+#
+# Open the saved JSON and confirm id, displayName, and platform match the
+# selection from Step 3.2. From its nested Connected Platform definition, copy
+# the exact values into:
+#
+# A365_EXP3_PROVIDER_SOURCE_AGENT_ID=<exact-SourceAgentId>
+# A365_EXP3_SOURCE_CREATED_AT=<exact-CreatedDateTime>
+# A365_EXP3_SOURCE_MODIFIED_AT=<exact-LastModifiedDateTime>
+#
+# Preserve SourceAgentId byte-for-byte. Save .env and reload REST Client before
+# any create request.
 
 # @name exp3PackageBefore
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}
@@ -83,41 +128,191 @@ Accept: application/json
 
 ###
 
-# Confirm the Package contains the exact provider source ID from .env.
-# SAVE REQUIRED: Blueprint response as blueprint-before-create.json.
+###############################################################################
+# Stop 3A - approve one disposable platform Blueprint
+#
+# The selected Registry Sync Package has no Blueprint or Agent Identity. That
+# absence does not prove that no reusable platform Blueprint exists, so first
+# reconcile protected platform/group mapping. Continue only when:
+# - A365_EXP3_BLUEPRINT_GROUP is the approved disposable platform boundary;
+# - no approved reusable Blueprint is recorded for this platform/group;
+# - no earlier Blueprint create has an unresolved outcome; and
+# - creating one disposable Blueprint is explicitly authorized.
 
-# @name exp3Blueprint
-GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+###############################################################################
+# Step 3.4 - Create the disposable platform Blueprint
+#
+# DO NOT SEND until Stop 3A is satisfied.
+# Expected: 201. Save the response or safe error body as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/blueprint-create-response.json
+#
+# On timeout, 5xx, or another ambiguous result, stop and do not retry.
+
+# @name exp3CreateBlueprint
+POST {{graphBaseUrl}}/v1.0/applications/microsoft.graph.agentIdentityBlueprint
 Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Content-Type: application/json
 Accept: application/json
+
+{
+  "displayName": "GoogleVertexAI - {{blueprintGroup}} - disposable Blueprint",
+  "sponsors@odata.bind": [
+    "{{graphBaseUrl}}/v1.0/users/{{exp3CurrentUser.response.body.$.id}}"
+  ],
+  "owners@odata.bind": [
+    "{{graphBaseUrl}}/v1.0/users/{{exp3CurrentUser.response.body.$.id}}"
+  ]
+}
 
 ###
 
-# SAVE REQUIRED: Agent Identity response as identity-before-create.json.
+###############################################################################
+# Step 3.5 - Verify the created Blueprint
+#
+# Run only after Step 3.4 returned 201. Expected: 200.
+# Save the response as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/blueprint-after-create.json
 
-# @name exp3AgentIdentity
-GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+# @name exp3GetCreatedBlueprint
+GET {{graphBaseUrl}}/v1.0/applications/{{exp3CreateBlueprint.response.body.$.id}}/microsoft.graph.agentIdentityBlueprint
 Authorization: Bearer {{exp3Token.response.body.$.access_token}}
 Accept: application/json
 
 ###
 
 ###############################################################################
-# Stop 3A - approve exactly one create
+# Step 3.6 - Check whether the Blueprint principal already exists
+#
+# Expected: 200 or a definite 404. Save the response or safe error body as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/blueprint-principal-before-create.json
+#
+# A 403 or another error is a stop condition, not permission to create.
+
+# @name exp3GetBlueprintPrincipal
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{exp3GetCreatedBlueprint.response.body.$.appId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3B - approve one Blueprint principal creation
+#
+# Send Step 3.7 only when Step 3.6 returned a definite 404, no earlier
+# principal create is unresolved, and one creation is explicitly authorized.
+# Skip Step 3.7 when Step 3.6 returned 200.
+
+###############################################################################
+# Step 3.7 - Create the missing Blueprint principal
+#
+# Expected: 201. Save the response or safe error body as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/blueprint-principal-create-response.json
+#
+# On timeout, 5xx, or another ambiguous result, stop and do not retry.
+
+# @name exp3CreateBlueprintPrincipal
+POST {{graphBaseUrl}}/v1.0/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "appId": "{{exp3GetCreatedBlueprint.response.body.$.appId}}"
+}
+
+###
+
+###############################################################################
+# Step 3.8 - Verify the Blueprint principal
+#
+# Run after Step 3.6 returned 200 or Step 3.7 returned 201. Expected: 200.
+# Confirm appId matches the Blueprint and accountEnabled is not false.
+# Save the response as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/blueprint-principal-after-create.json
+
+# @name exp3VerifyBlueprintPrincipal
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{exp3GetCreatedBlueprint.response.body.$.appId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3C - approve one Agent Identity creation
 #
 # Continue only when:
-# - the Package, provider source, Blueprint, and Agent Identity all match .env;
-# - the Agent Identity belongs to the selected Blueprint;
+# - the Blueprint and enabled principal were verified;
+# - the selected GCP source belongs to the approved Blueprint group;
+# - no Agent Identity or unresolved identity create exists for this source; and
+# - one Agent Identity creation is explicitly authorized.
+
+###############################################################################
+# Step 3.9 - Create the Agent Identity under the Blueprint
+#
+# Expected: 201. Save the response or safe error body as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/agent-identity-create-response.json
+#
+# On timeout, 5xx, or another ambiguous result, stop and do not retry.
+
+# @name exp3CreateAgentIdentity
+POST {{graphBaseUrl}}/v1.0/servicePrincipals/microsoft.graph.agentIdentity
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{targetName}} - managed Agent Identity",
+  "agentIdentityBlueprintId": "{{exp3GetCreatedBlueprint.response.body.$.appId}}",
+  "sponsors@odata.bind": [
+    "{{graphBaseUrl}}/v1.0/users/{{exp3CurrentUser.response.body.$.id}}"
+  ]
+}
+
+###
+
+###############################################################################
+# Step 3.10 - Verify the created Agent Identity
+#
+# Run only after Step 3.9 returned 201. Expected: 200.
+# Confirm agentIdentityBlueprintId matches the Blueprint appId and
+# servicePrincipalType is ServiceIdentity. Save the response as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/agent-identity-after-create.json
+
+# @name exp3GetCreatedAgentIdentity
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{exp3CreateAgentIdentity.response.body.$.id}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Stop 3D - approve exactly one companion Registration create
+#
+# Continue only when:
+# - the Package and exact provider source match the selected inventory record;
+# - the new Agent Identity belongs to the new Blueprint;
 # - no active or unresolved companion mapping exists for this provider source;
 # - the target is disposable and approved; and
-# - one create attempt is explicitly authorized.
+# - one Registration create attempt is explicitly authorized.
 #
 # The Registration source is deliberately different from the provider source:
 #
 # agent-governance:companion:v1:gcp:<exact-provider-source-agent-id>
+
+###############################################################################
+# Step 3.11 - Create the companion Registration
 #
-# SAVE REQUIRED: response body as registration-create-response.json and record
-# the HTTP status separately. On timeout or 5xx, stop and do not retry.
+# SAVE REQUIRED: response body and safe error body as:
+# ../../evidence/experiments/03-companion-source-registration-create/registration-create-response.json
+# Record the HTTP status in the same JSON result. On timeout or 5xx, stop and
+# do not retry.
 
 # @name exp3CreateCompanion
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -137,29 +332,94 @@ OData-Version: 4.0
   "originatingStore": "GoogleVertexAI",
   "sourceCreatedDateTime": "{{sourceCreatedAt}}",
   "sourceLastModifiedDateTime": "{{sourceModifiedAt}}",
-  "agentIdentityBlueprintId": "{{blueprintAppId}}",
-  "agentIdentityId": "{{agentIdentityId}}"
+  "agentIdentityBlueprintId": "{{exp3GetCreatedBlueprint.response.body.$.appId}}",
+  "agentIdentityId": "{{exp3GetCreatedAgentIdentity.response.body.$.id}}"
 }
 
 ###
 
 ###############################################################################
-# Step 3.3 - Read back only after 201
+# Step 3.12 - Convert the returned Registration ID and read it back
 #
-# SAVE REQUIRED: response body as registration-after-create.json.
+# The Registration create response can return an id containing `%2F`. This id
+# is distinct from A365_EXP3_PROVIDER_SOURCE_AGENT_ID. Keep the provider source
+# value unchanged because it is used in the JSON create body.
+#
+# Before sending this GET:
+#
+# 1. Copy and run this one-line command in PowerShell:
+#
+# [uri]::EscapeDataString((Read-Host 'Paste Registration id').Trim()) | Set-Clipboard
+#
+# 2. When prompted, copy the exact `id` from the saved
+#    registration-create-response.json, paste it into PowerShell, and press
+#    Enter.
+# 3. Paste the converted clipboard value into the ignored .env:
+#
+# A365_EXP3_CREATED_REGISTRATION_ID_PATH=<path-safe-created-registration-id>
+#
+# 4. Save .env and reload REST Client. An original `%2F` must appear as
+#    `%252F` in this path-only variable.
+#
+# SAVE REQUIRED:
+# ../../evidence/experiments/03-companion-source-registration-create/registration-after-create.json
 
 # @name exp3GetCreatedCompanion
-GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{exp3CreateCompanion.response.body.$.id}}
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationIdPath}}
 Authorization: Bearer {{exp3Token.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
 
 ###
 
-# Confirm the returned source, Blueprint, Agent Identity, owner, and platform.
-# SAVE REQUIRED: response body as package-after-create.json.
+###############################################################################
+# Step 3.13 - List Packages after Registration creation
+#
+# Registration creation can also materialize a new Package, but this experiment
+# must not assume its Package ID equals the Registration ID.
+#
+# Save the first response as:
+#
+# ../../evidence/experiments/03-companion-source-registration-create/package-list-after-create-page-1.json
+#
+# If @odata.nextLink is present, save later pages as
+# package-list-after-create-page-2.json, page-3.json, and so on until the latest
+# response has no @odata.nextLink.
+#
+# Across all pages, identify both records independently:
+#
+# 1. Original Registry Sync Package:
+#    - id equals A365_EXP3_PACKAGE_ID;
+#    - platform is GoogleVertexAI; and
+#    - nested source equals A365_EXP3_PROVIDER_SOURCE_AGENT_ID.
+#
+# 2. Newly materialized companion Package:
+#    - source matches the companion source from Step 3.11;
+#    - Blueprint and Agent Identity links match the created objects; and
+#    - it is not selected only by display name.
+#
+# Copy the new Package's top-level id into the ignored .env:
+#
+# A365_EXP3_CREATED_PACKAGE_ID=<new-companion-package-id>
+#
+# If the second Package is not present yet, record that observation, wait for
+# the agreed propagation period, and repeat this read-only list. Do not create
+# another Registration.
+#
+# @name exp3ListPackagesAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
 
-# @name exp3PackageAfter
+###
+
+###############################################################################
+# Step 3.14 - Confirm the original Registry Sync Package is unchanged
+#
+# SAVE REQUIRED:
+# ../../evidence/experiments/03-companion-source-registration-create/original-package-after-create.json
+
+# @name exp3OriginalPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}
 Authorization: Bearer {{exp3Token.response.body.$.access_token}}
 Accept: application/json
@@ -167,9 +427,26 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Stop 3B - save the mapping
+# Step 3.15 - Read the newly materialized companion Package
+#
+# Run only after Step 3.13 found one unambiguous new Package ID.
+# Confirm its companion source, Blueprint, Agent Identity, owner, and platform.
+#
+# SAVE REQUIRED:
+# ../../evidence/experiments/03-companion-source-registration-create/companion-package-after-create.json
+
+# @name exp3CompanionPackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{createdPackageId}}
+Authorization: Bearer {{exp3Token.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Finalize - save the complete mapping
 #
 # Save the provider source, current Package ID, companion source, returned
-# Registration ID, Blueprint app ID, and Agent Identity ID in protected local
-# state. Do not delete the companion until the rename and delete demos have
-# completed or separate cleanup is approved.
+# Registration ID, Blueprint object ID and app ID, Blueprint principal ID, and
+# Agent Identity ID in protected local state. Record that all three Entra
+# objects were created by this experiment. Do not delete them until the rename
+# and delete demos have completed or separate cleanup is approved.

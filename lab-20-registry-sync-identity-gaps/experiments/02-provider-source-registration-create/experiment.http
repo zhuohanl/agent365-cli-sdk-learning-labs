@@ -26,6 +26,13 @@
 # Copy them only from:
 # ../../evidence/experiments/02-provider-source-registration-create/disposable-before-create.json
 # Do not place real values in this tracked file.
+#
+# Save every non-authentication result under:
+# ../../evidence/experiments/02-provider-source-registration-create/
+#
+# Use the exact file named beside each request. These files are ignored local
+# evidence and can contain identifiers. Never save the device-code, token, or
+# /me responses.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
@@ -108,6 +115,9 @@ Accept: application/json
 #
 # The signed-in experiment user is recorded as creator and owner.
 # managedByAppId, Blueprint ID, and Entra Agent ID are not supplied.
+#
+# Save the response body, including a safe error body, to:
+#   ../../evidence/experiments/02-provider-source-registration-create/create-correlation-registration.json
 
 # @name createCorrelationRegistration
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -134,6 +144,9 @@ Accept: application/json
 #
 # Confirm this is yesterday's user-owned disposable registration. Do not use a
 # Package ID or the current notebook source. A successful GET does not write.
+#
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/registration-before-description-update.json
 
 # @name getCreatedRegistrationBeforeDescriptionUpdate
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
@@ -149,6 +162,9 @@ Accept: application/json
 #
 # Expected: 200 OK with an empty response body.
 # The documented update operation is PATCH, not POST.
+#
+# Save a JSON object containing the HTTP status and whether a body was present:
+#   ../../evidence/experiments/02-provider-source-registration-create/description-update-status.json
 
 # @name updateCreatedRegistrationDescription
 PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
@@ -265,6 +281,9 @@ Accept: application/json
 # Before sending, run C4.3 and save the latest registration response. The
 # experiment owner explicitly accepted that a failed recreate can leave this
 # registration permanently deleted.
+#
+# Save a JSON object containing the HTTP status and whether a body was present:
+#   ../../evidence/experiments/02-provider-source-registration-create/delete-registration-status.json
 
 # @name deleteCreatedRegistration
 DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
@@ -278,6 +297,9 @@ Authorization: Bearer {{correlationToken.response.body.$.access_token}}
 # Expected:
 #   404 Not Found
 # Observed in this experiment: 404.
+#
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/deleted-registration-read.json
 
 # @name getDeletedRegistration
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createdRegistrationId}}
@@ -302,6 +324,9 @@ Accept: application/json
 #
 # If this request fails, the old registration remains permanently deleted.
 # Do not retry automatically. Save the response privately and stop.
+#
+# Save the response body, including a safe error body, to:
+#   ../../evidence/experiments/02-provider-source-registration-create/recreate-correlation-registration.json
 
 # @name recreateCorrelationRegistrationAfterDelete
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -334,6 +359,9 @@ Accept: application/json
 #
 # Save the response body privately, then replace A365_CREATED_REGISTRATION_ID
 # in .env with the new returned ID before any later cleanup.
+#
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/recreated-registration.json
 
 # @name getRecreatedRegistration
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{recreateCorrelationRegistrationAfterDelete.response.body.$.id}}
@@ -371,6 +399,9 @@ Accept: application/json
 #
 # Expected:
 #   200 OK
+#
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/original-package-after-delete-recreate.json
 
 # @name getOriginalPackageAfterDeleteRecreate
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{samplePackageId}}
@@ -386,6 +417,8 @@ Accept: application/json
 # individually before preparing any POST. Confirm each returned Package ID and
 # nested SourceAgentId match the private .env target.
 
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-1-package-details.json
 # @name getGcpProbe1PackageDetails
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe1PackageId}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -393,6 +426,8 @@ Accept: application/json
 
 ###
 
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-2-package-details.json
 # @name getGcpProbe2PackageDetails
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe2PackageId}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -400,6 +435,8 @@ Accept: application/json
 
 ###
 
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-3-package-details.json
 # @name getGcpProbe3PackageDetails
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe3PackageId}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -407,6 +444,8 @@ Accept: application/json
 
 ###
 
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-4-package-details.json
 # @name getGcpProbe4PackageDetails
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{gcpProbe4PackageId}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -437,6 +476,9 @@ Accept: application/json
 #
 # The provider agent is read-only and is not deleted or changed. A successful
 # POST creates only a separate Agent 365 registration for its source.
+#
+# Save the response body, including a safe error body, to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-3-create.json
 
 # @name createGcpProbe3Registration
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -459,6 +501,8 @@ Accept: application/json
 ###
 
 # Run only after probe 3 returns 201.
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-3-registration-before-update.json
 # @name getCreatedGcpProbe3RegistrationBeforeDescriptionUpdate
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -467,6 +511,8 @@ Accept: application/json
 
 ###
 
+# Save a JSON object containing the HTTP status and whether a body was present:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-3-description-update-status.json
 # @name updateCreatedGcpProbe3RegistrationDescription
 PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -480,6 +526,8 @@ Accept: application/json
 ###
 
 # Run only after probe 3 returns 201.
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-3-registration-after-update.json
 # @name getCreatedGcpProbe3RegistrationAfterDescriptionUpdate
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe3Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}
@@ -492,6 +540,9 @@ Accept: application/json
 #
 # Observed: HTTP 500 with the same backend permission-denial message and no
 # Registration ID. Do not send this POST again.
+#
+# Save the response body, including a safe error body, to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-4-create.json
 
 # @name createGcpProbe4Registration
 POST {{graphBaseUrl}}/beta/copilot/agentRegistrations
@@ -514,6 +565,8 @@ Accept: application/json
 ###
 
 # Run only after probe 4 returns 201.
+# Save the response body to:
+#   ../../evidence/experiments/02-provider-source-registration-create/gcp-probe-4-registration.json
 # @name getCreatedGcpProbe4Registration
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{createGcpProbe4Registration.response.body.$.id}}
 Authorization: Bearer {{correlationToken.response.body.$.access_token}}

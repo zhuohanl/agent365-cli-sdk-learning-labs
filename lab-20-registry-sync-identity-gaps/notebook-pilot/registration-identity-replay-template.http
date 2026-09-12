@@ -2,7 +2,7 @@
 #
 # The tracked version contains placeholders and must not be sent.
 # Do not paste private values into the tracked version.
-# Follow ../INSTRUCTION.md, "Replay a failed notebook POST in REST Client", to
+# Follow ../docs/INSTRUCTION.md, "Replay a failed notebook POST in REST Client", to
 # export a captured failed response or prepare the current request without
 # sending it, always into the ignored evidence directory.
 #

@@ -34,19 +34,42 @@
 @agentIdentityId = {{$dotenv A365_DEMO_AGENT_IDENTITY_ID}}
 @companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
 @graphBaseUrl = https://graph.microsoft.com
-@readAccessToken = {{$aadV2Token scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All tenantId:{{tenantId}} clientId:{{clientId}}}}
-@dependencyReadToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/Application.Read.All tenantId:{{tenantId}} clientId:{{clientId}}}}
-@registrationDeleteToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All,https://graph.microsoft.com/AgentRegistration.ReadWrite.All tenantId:{{tenantId}} clientId:{{clientId}}}}
-@identityDeleteToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentIdentity.DeleteRestore.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+@deleteScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FApplication.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.DeleteRestore.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+
+###############################################################################
+# Authentication 1 - Request a device code
+#
+# Never save this response.
+
+# @name deleteStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{deleteScopes}}
+
+###
+
+###############################################################################
+# Authentication 2 - Exchange the device code after browser sign-in
+#
+# Never save this response.
+
+# @name deleteToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{deleteStartDeviceCode.response.body.$.device_code}}
+
+###
 
 ###############################################################################
 # Part 1.1 - Confirm the signed-in operator
 #
-# Expected: 200. Sending this request triggers REST Client authentication.
+# Send after Authentication 2 succeeds. Expected: 200.
 
 # @name deleteCurrentUser
 GET {{graphBaseUrl}}/v1.0/me?$select=id
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -59,7 +82,7 @@ Accept: application/json
 
 # @name deleteListPackagesBefore
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -72,7 +95,7 @@ Accept: application/json
 
 # @name deleteGetOriginalPackageBefore
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -90,7 +113,7 @@ Accept: application/json
 
 # @name deleteGetRegistrationBefore
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
 
@@ -103,7 +126,7 @@ OData-Version: 4.0
 
 # @name deleteGetIdentityBefore
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -121,7 +144,7 @@ Accept: application/json
 
 # @name deleteGetIdentityAppRoleAssignments
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/appRoleAssignments
-Authorization: Bearer {{dependencyReadToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -133,7 +156,7 @@ Accept: application/json
 
 # @name deleteGetIdentityMemberships
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity/memberOf?$select=id,displayName
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -164,7 +187,7 @@ Accept: application/json
 
 # @name deleteListPackagesAfterSourceDeletion
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -180,7 +203,7 @@ Accept: application/json
 
 # @name deleteGetOriginalPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -210,7 +233,7 @@ Accept: application/json
 
 # @name deleteCompanionRegistration
 DELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{registrationDeleteToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
 
@@ -224,7 +247,7 @@ OData-Version: 4.0
 
 # @name deleteGetRegistrationAfter
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
 
@@ -238,7 +261,7 @@ OData-Version: 4.0
 
 # @name deleteListPackagesAfterRegistrationDeletion
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -251,7 +274,7 @@ Accept: application/json
 
 # @name deleteGetIdentityAfterRegistrationDeletion
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -276,7 +299,7 @@ Accept: application/json
 
 # @name deleteAgentIdentity
 DELETE {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{identityDeleteToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -292,7 +315,7 @@ Accept: application/json
 
 # @name deleteGetIdentityAfter
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###

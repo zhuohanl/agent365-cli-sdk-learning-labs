@@ -9,9 +9,10 @@ that companion registration creation is supported in production.
 - [DD-001: Registry Sync platform connection names](#dd-001-registry-sync-platform-connection-names)
 - [DD-002: Companion source IDs](#dd-002-companion-source-ids)
 - [DD-003: Durable relationship mapping](#dd-003-durable-relationship-mapping)
-- [DD-004: Add lifecycle](#dd-004-add-lifecycle)
-- [DD-005: Delete lifecycle](#dd-005-delete-lifecycle)
-- [DD-006: Rename lifecycle](#dd-006-rename-lifecycle)
+- [DD-004: Blueprint assignment and grouping](#dd-004-blueprint-assignment-and-grouping)
+- [DD-005: Add lifecycle](#dd-005-add-lifecycle)
+- [DD-006: Delete lifecycle](#dd-006-delete-lifecycle)
+- [DD-007: Rename lifecycle](#dd-007-rename-lifecycle)
 - [Current boundaries](#current-boundaries)
 
 | ID | Decision | Status |
@@ -19,9 +20,10 @@ that companion registration creation is supported in production.
 | DD-001 | Use a consistent human-readable name for each Registry Sync platform connection. | Adopted local convention |
 | DD-002 | Derive a companion source ID from the exact provider source ID. | Adopted from GCP creation and connection-recreation evidence; production and cross-provider support unresolved |
 | DD-003 | Keep a durable source-to-package-to-registration mapping even when the companion source ID is reversible. | Required |
-| DD-004 | Add identities through one platform-level Blueprint step followed by a per-Package Agent Identity and companion Registration loop. | Experiment-derived implementation rule; production support unresolved |
-| DD-005 | Treat source disappearance as a reconciliation signal and retire the companion Registration before its dedicated Agent Identity. | Experiment-derived implementation rule; production support unresolved |
-| DD-006 | Treat a display-name change for the same scoped provider source key as an in-place rename, not delete plus add. | Documented update operations identified; end-to-end rename not yet observed |
+| DD-004 | Default to one dedicated Blueprint per scoped provider source and Agent Identity; retain shared onboarding as an explicit exception. | Adopted local architecture decision; production support unresolved |
+| DD-005 | Resolve the DD-004 assignment, prepare one Blueprint per approved group, then create the per-source Agent Identity and companion Registration. | Experiment-derived implementation rule; production support unresolved |
+| DD-006 | Treat source disappearance as a reconciliation signal and retire the companion Registration before its dedicated Agent Identity. | Experiment-derived implementation rule; production support unresolved |
+| DD-007 | Treat a display-name change for the same scoped provider source key as an in-place rename, not delete plus add. | Documented update operations identified; end-to-end rename not yet observed |
 
 ## DD-001: Registry Sync platform connection names
 
@@ -186,7 +188,12 @@ Persist at least:
 | `packageId` | Current Registry Sync inventory reference; not a Registration ID. |
 | `companionSourceAgentId` | Deterministic DD-002 value. |
 | `companionRegistrationId` | Addressable ID returned by a successful registration POST. |
-| `blueprintId` | Actual Blueprint application ID used by the companion. |
+| `assignmentMode` | `unassigned`, `shared`, or `dedicated`; store it separately from the group label. |
+| `blueprintGroup` | Stable customer-defined policy label; null while unassigned. |
+| `groupingPolicyVersion` | Approved policy version that assigned the source to the group. |
+| `blueprintObjectId` | Blueprint application object ID used by the group. |
+| `blueprintId` | Blueprint application `appId` used by the companion. |
+| `blueprintPrincipalId` | Tenant-local Blueprint principal object ID. |
 | `agentIdentityId` | Actual Entra Agent Identity object ID used by the companion. |
 | `status` | Planned, pending, created, failed, deleted, or reconciliation-required. |
 | `lastObservedAt` | Time at which the relationship was last verified. |
@@ -203,26 +210,192 @@ change or recreate inventory records. The provider source key anchors the
 relationship, while the returned Registration ID anchors supported GET,
 PATCH, and DELETE operations on the separately managed companion.
 
-## DD-004: Add lifecycle
+## DD-004: Blueprint assignment and grouping
 
-The add flow has two different levels. Blueprint preparation is
-platform-level work. Agent Identity and companion Registration preparation
-are per-agent work performed while iterating through individual Registry Sync
+Default each new eligible scoped provider source selected for onboarding to
+one dedicated Blueprint and one Agent Identity:
+
+```text
+one scoped provider source
+-> one dedicated Blueprint
+-> one Agent Identity
+```
+
+This is a one-to-one Blueprint-to-Agent-Identity relationship for the default
+path, not one Blueprint per platform, Registry Sync connection, or Package.
+Use the DD-003 source key to reconcile an existing assignment when a Package
+or connection changes.
+
+This is a local architecture decision, not a Microsoft requirement that every
+Blueprint have only one Agent Identity. Keep `shared` as a separate, explicitly
+approved onboarding path. Do not delay normal onboarding while someone
+searches for a possible shared group.
+
+### Why dedicated is the default
+
+1. **A Blueprint is more than a template.** It holds authentication
+   credentials and protocol settings and can acquire tokens for its child
+   Agent Identities. It also defines inheritable baseline permissions.
+   Compromise of that authentication authority can expose access granted to
+   multiple children, even when their individual permissions differ.
+2. **Registry Sync does not establish safe sharing.** A common platform,
+   offering, project, account, team, or deployment method does not prove that
+   agents should share Entra authentication authority. The onboarding service
+   must not require its operator to understand every provider's runtime
+   internals or have a complete view of all organizational Blueprint groups.
+3. **Onboarding must not wait for a sharing decision.** A provider team might
+   create an agent before any sharing policy is updated. An approved
+   dedicated-default policy lets the service assign that source immediately,
+   without a per-agent human gate merely to decide whether it could share.
+4. **Unnecessary separation has a more manageable cost than unsafe sharing.**
+   Dedicated Blueprints add objects, credential configuration, permission
+   maintenance, quota pressure, and drift risk. Reusable desired-state
+   templates and batch reconciliation can reduce that work without sharing
+   authentication credentials. They do not remove quotas or the need for
+   authorization, but administrative convenience alone does not justify
+   expanding the credential compromise impact.
+
+Separate Blueprint IDs are not sufficient isolation if the same secret,
+external workload identity, or unrestricted credential broker can authenticate
+as all of them. When credentials or federation are configured, preserve the
+intended separation of authentication authority. A prompt-level compromise
+does not by itself prove that this authority has been compromised.
+
+Microsoft documents the credential model and trust-boundary considerations
+in [Agent identity blueprints](https://learn.microsoft.com/en-us/entra/agent-id/agent-blueprint)
+and [Plan an agent identity architecture](https://learn.microsoft.com/en-us/entra/agent-id/how-to-plan-agent-identity-architecture#step-3-decide-how-many-agent-identity-blueprints).
+The dedicated default is this solution's response to those considerations
+and the limits of Registry Sync evidence.
+
+### Assignment modes
+
+Store `assignmentMode` separately from `blueprintGroup`, the stable key for a
+Blueprint binding. A dedicated assignment is a single-member group, so both
+paths use DD-005's same lifecycle code; it does not require discovering an
+organizational group first.
+
+| Mode | Meaning | Creation behavior |
+| --- | --- | --- |
+| `dedicated` | Default; the Blueprint is reserved for one source's Agent Identity. | Generate a single-member assignment under the standing policy, without a separate sharing review. |
+| `shared` | Explicitly approved exception for exact members that may safely share authentication authority and inherited baseline permissions. | Approve membership and the intended Blueprint binding before creating member identities. |
+| `unassigned` | No established assignment because prerequisites are missing, a decision is pending, or a safety hold applies. | Create no Blueprint, Agent Identity, or companion Registration. |
+
+An `unassigned` source has `blueprintGroup: null`; never create an "unassigned
+Blueprint". Existing bindings are retained when processing is blocked, not
+reset to `unassigned`. Missing a source-specific sharing policy is not a
+reason to hold an otherwise eligible source.
+
+### Resolve assignments without a sharing gate
+
+The standing onboarding policy supplies `responsibleTeam`,
+`credentialController`, `maintainer`, and `baselineAccessDecision`, either
+directly or through pre-approved source-to-policy lookup rules. Baseline
+access may explicitly be provisioning-only; assigning a Blueprint does not
+grant runtime permissions. The policy also supplies its `policyVersion` and
+`approvalReference`. Record the resolved values with the generated assignment,
+without requesting fresh approval merely because a new source was discovered.
+
+Source-specific prerequisites remain the complete DD-003 source key and
+eligibility under that policy, including authorization to create the required
+objects. If the policy cannot resolve required ownership, credential
+responsibility, or baseline access, stop that source rather than inventing
+values or permissions.
+
+1. Confirm the source is selected for onboarding under an approved policy and
+   has the complete DD-003 source key. Missing required authorization,
+   explicit holds, conflicting mappings, or unresolved writes stop that
+   source. Keep a source without an established assignment `unassigned`;
+   retain an existing assignment and its known IDs, recording the stop reason
+   and `reconciliation-required` for conflicting or unresolved state.
+2. Reconcile an existing assignment and Blueprint binding before creating
+   anything. Preserve valid existing dedicated or shared bindings. A parent
+   mismatch requires reconciliation, not a new dedicated Blueprint as a
+   fallback.
+3. Process a new source explicitly selected for shared onboarding through
+   that separate approval path. Approve its exact membership, credential
+   authority, baseline access, ownership, lifecycle and disablement impact,
+   capacity, and intended Blueprint binding before creating member identities.
+   A pending decision holds only the selected sources.
+4. For every other new eligible source, generate a deterministic
+   single-member `dedicated` assignment under the approved default policy.
+   Record the group, exact member, policy version, and approval reference
+   before DD-005 prepares its Blueprint.
+
+An "approved assignment" in DD-005 includes this generated dedicated
+assignment. Its approval reference points to the standing policy, not a new
+per-source sharing decision.
+
+### Minimum binding invariants
+
+1. Every selected scoped source has one assignment state and, when assigned,
+   exactly one approved group. Each `(tenant, blueprintGroup)` has at most one
+   active Blueprint binding.
+2. A dedicated group has exactly one scoped source and at most one active
+   Agent Identity. Completed provisioning gives that source one Blueprint
+   and one Agent Identity; never reuse its Blueprint for another source or
+   group.
+3. Keep `blueprintGroup` stable and unique within the tenant. Generate default
+   keys from the complete DD-003 source key, not a display name. Store mode,
+   exact `members`, and policy metadata explicitly; do not infer them by
+   parsing the key. Stored object IDs, not display names, identify the bound
+   Entra objects.
+4. Persist and reuse the DD-003 mapping, including the assignment's
+   `policyVersion` as `groupingPolicyVersion`. Changing a group key or binding
+   requires a separately approved migration that accounts for credentials,
+   permissions, and consumers and retains historical mappings. A later
+   sharing proposal must not automatically consolidate Blueprints, reparent
+   or replace Agent Identities, or delete old objects.
+5. The companion source ID remains derived from the provider source under
+   DD-002; assignment mode, group changes, and display-name changes do not
+   change it.
+
+## DD-005: Add lifecycle
+
+The add flow has two levels. Blueprint assignment and preparation are
+group-level work. Agent Identity and companion Registration preparation are
+per-source work performed while iterating through individual Registry Sync
 Packages.
 
-### Part 1: Prepare the platform Blueprint once
+DD-004 defines the assignment modes, group invariants, and policy data used by
+this lifecycle. DD-005 consumes that decision; it does not redefine grouping.
 
-For each configured platform, first resolve the approved platform Blueprint
-and its principal. Create them only when the platform has no approved reusable
-objects and creation has been explicitly enabled.
+The implementation must plan assignments first, prepare the required group
+Blueprints, and only then process individual sources.
 
-Persist the Blueprint object ID, Blueprint app ID, principal ID, platform, and
-capacity state. Do not create a new Blueprint for every Package.
+### Part 1: Resolve assignments and prepare each group Blueprint
 
-A platform-level Blueprint may still need planned sharding when product limits
-or customer isolation requirements prevent every platform agent from sharing
-one Blueprint. That is a capacity decision within Part 1; it does not move
-Blueprint creation into the per-Package loop.
+After discovering the complete Package inventory, resolve one approved
+DD-004 assignment for each selected scoped provider source. Reconcile existing
+bindings first; for new eligible sources, generate the dedicated assignment
+under the standing policy unless the source is explicitly selected for shared
+onboarding. An assignment need not exist before discovery.
+
+An `unassigned` source stops at `blueprint-assignment-required`. It remains in
+the observed inventory and journal, but no Entra or companion object is
+created for it. Never create an "unassigned Blueprint" because that would
+silently place unrelated, unreviewed sources into one shared credential
+boundary.
+
+For every approved `(tenant, blueprintGroup)`:
+
+1. Validate the policy version and member allowlist.
+2. Enforce that `dedicated` groups contain exactly one active scoped source.
+3. Resolve the group's existing Blueprint application and tenant-local
+   principal from the durable binding.
+4. Create them only when no approved reusable binding exists and creation has
+   been explicitly enabled.
+5. Persist the Blueprint object ID, Blueprint app ID, principal ID, platform
+   and offering classifications, assignment mode, policy version, and
+   capacity state.
+
+Prepare one Blueprint per approved group, not one Blueprint per platform and
+not automatically one Blueprint per Package. Multiple groups can exist within
+one platform or connection. Multiple platforms or connections may share a
+group only when an explicit review approves the same credential and
+governance boundary.
+
+Capacity sharding creates another explicitly approved group; it must not
+silently bind one existing group label to multiple active Blueprints.
 
 ### Parts 2 and 3: Process one Package at a time
 
@@ -235,16 +408,20 @@ Package:
 2. Reconcile that key with the durable mapping. A changed Package ID for the
    same source updates the inventory pointer; it does not create another
    identity or companion.
-3. Resolve or create one Agent Identity for that source under the platform
+3. Resolve the approved assignment. If it is `unassigned`, record
+   `blueprint-assignment-required` and stop processing that source.
+4. Read and verify the active Blueprint binding for the source's approved
+   `(tenant, blueprintGroup)`.
+5. Resolve or create one Agent Identity for that source under the group
    Blueprint, then save its ID before continuing.
-4. Resolve the companion state from the journal. If an active Registration ID
+6. Resolve the companion state from the journal. If an active Registration ID
    exists, read and verify it instead of creating another Registration.
-5. When an approved source has no existing or unresolved companion, create
+7. When an approved source has no existing or unresolved companion, create
    exactly one Registration using the DD-002 companion source ID and the
    source's Agent Identity.
-6. Save the returned Registration ID immediately, GET that exact ID, and
+8. Save the returned Registration ID immediately, GET that exact ID, and
    verify its source, Blueprint, Agent Identity, owner, and platform fields.
-7. Re-read the original Registry Sync Package and confirm that its independent
+9. Re-read the original Registry Sync Package and confirm that its independent
    inventory record was not assumed to be enriched or replaced.
 
 Serialize writes for each scoped provider source key. A timeout or unexpected
@@ -256,22 +433,31 @@ The intended add states are:
 
 ```text
 package-observed
--> platform-blueprint-resolved
+-> blueprint-assignment-resolved
+-> group-blueprint-resolved
 -> agent-identity-resolved
 -> companion-create-pending
 -> companion-created
 -> companion-association-verified
 ```
 
-The Blueprint state is shared platform preparation. The remaining states are
+An unassigned source takes the separate non-writing path:
+
+```text
+package-observed
+-> blueprint-assignment-required
+```
+
+The Blueprint state is group-level preparation. The remaining states are
 tracked independently for each Package/source.
 
 ### Add flow
 
 This flow follows the rightmost concept in
 [`third_party_agent_registry.svg`](third_party_agent_registry.svg): discover
-the platforms first, prepare the shared Blueprint at platform scope, and then
-loop through each Package to create or resolve the per-agent objects.
+the sources first, resolve their approved Blueprint assignments, prepare each
+group Blueprint, and then loop through assigned Packages to create or resolve
+the per-source objects.
 
 All three lifecycle diagrams below use the same regions, so they can be read
 against each other:
@@ -279,10 +465,11 @@ against each other:
 | Region | Colour | Meaning |
 | --- | --- | --- |
 | Discovery / detection | Amber | Read-only observation before any decision |
-| PART 1 | Blue | Blueprint, platform scope, shared |
+| Assignment resolution | Grey | Generate or reconcile assignments; blocked sources stop without creating objects |
+| PART 1 | Blue | Blueprint, one per approved shared or dedicated group |
 | PART 2 | Purple | Agent Identity, one per scoped provider source |
 | PART 3 | Green | Companion Registration, one per scoped provider source |
-| Loop / gate | Grey | Iteration boundary or approval gate |
+| Loop | Grey | Per-source iteration boundary |
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
@@ -290,21 +477,34 @@ flowchart TB
     subgraph DISCOVERY["<b>DISCOVERY</b> - read only"]
         direction TB
         A1["Read every<br/>Package List page"]
-        A2["Group Packages<br/>by platform"]
+        A2["Read scoped provider<br/>source keys"]
         A1 --> A2
     end
 
-    subgraph PART1["<b>PART 1: BLUEPRINT</b> - once per platform"]
+    subgraph ASSIGN["<b>ASSIGNMENT RESOLUTION</b> - dedicated by default"]
         direction TB
-        B1{"Approved platform<br/>Blueprint exists?"}
-        B2["Create one approved<br/>platform Blueprint"]
-        B3["Blueprint ID<br/>shared by the platform"]
+        B6["Resolve DD-004 assignment:<br/>reconcile existing bindings;<br/>approve explicit shared onboarding;<br/>otherwise generate eligible dedicated"]
+        B0{"Assignment<br/>outcome?"}
+        B4["Record<br/>blueprint-assignment-required"]
+        B7["Retain known binding and IDs;<br/>record stop reason;<br/>reconciliation-required if unresolved"]
+        B5["Persist assignmentMode,<br/>blueprintGroup, members,<br/>policy version and approval reference"]
+        B6 --> B0
+        B0 -->|Unassigned| B4
+        B0 -->|"Existing binding blocked"| B7
+        B0 -->|"Approved and ready"| B5
+    end
+
+    subgraph PART1["<b>PART 1: BLUEPRINT</b> - once per approved group"]
+        direction TB
+        B1{"Approved group<br/>Blueprint exists?"}
+        B2["Create one approved<br/>group Blueprint"]
+        B3["Blueprint ID bound to<br/>(tenant, blueprintGroup)"]
         B1 -->|No| B2
         B2 --> B3
         B1 -->|Yes| B3
     end
 
-    subgraph LOOP["<b>FOR EACH PACKAGE</b> in the platform - repeat Parts 2 and 3"]
+    subgraph LOOP["<b>FOR EACH ASSIGNED PACKAGE</b> - repeat Parts 2 and 3"]
         direction TB
         C1["Read Package Details"]
         C2["Companion source ID<br/>built from the exact scoped<br/>provider sourceAgentId"]
@@ -313,7 +513,7 @@ flowchart TB
         subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - one per source"]
             direction TB
             D1{"Identity already<br/>mapped?"}
-            D2["Create Agent Identity<br/>under the platform Blueprint"]
+            D2["Create Agent Identity<br/>under the group Blueprint"]
             D3["Agent Identity ID"]
             D1 -->|No| D2
             D2 --> D3
@@ -340,15 +540,17 @@ flowchart TB
         F1 --> F2
     end
 
-    A2 --> B1
+    A2 --> B6
+    B5 --> B1
     B3 --> C1
     C2 --> D1
     B3 -.->|"input 1: Blueprint ID"| E0
     D3 -->|"input 2: Agent Identity ID"| E0
     C2 -.->|"input 3: companion source ID"| E0
-    F2 --> G1["Finish when every Package<br/>and platform is reconciled"]
+    F2 --> G1["Finish when every assigned<br/>Package and group is reconciled"]
 
     style DISCOVERY fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
+    style ASSIGN fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
     style PART1 fill:#e8f1fd,stroke:#1d4ed8,stroke-width:4px,color:#1e3a8a
     style PART2 fill:#f3ecfd,stroke:#6d28d9,stroke-width:4px,color:#4c1d95
     style PART3 fill:#e7f8f0,stroke:#047857,stroke-width:4px,color:#064e3b
@@ -356,17 +558,19 @@ flowchart TB
 ```
 
 The three dotted and solid inputs into Part 3 are the point of the diagram: a
-companion Registration POST is only possible once the platform Blueprint ID
-from Part 1, the Agent Identity ID from Part 2, and the deterministic companion
-source ID derived from the exact scoped provider `sourceAgentId` all exist for
-the same source.
+companion Registration POST is only possible once the approved group
+Blueprint ID from Part 1, the Agent Identity ID from Part 2, and the
+deterministic companion source ID derived from the exact scoped provider
+`sourceAgentId` all exist for the same source.
 
-Part 1 is shared preparation performed once for each platform. The outer
-Package loop then runs Parts 2 and 3 separately for each scoped provider
-source. That loop owns one mapping entry, one Agent Identity, and one companion
-Registration per source; it reuses the platform Blueprint prepared in Part 1.
+Part 1 is preparation performed once for each approved group. The outer
+Package loop then runs Parts 2 and 3 separately for each assigned scoped
+provider source. That loop owns one mapping entry, one Agent Identity, and one
+companion Registration per source; it reuses the group Blueprint prepared in
+Part 1. In `dedicated` mode the group has one member, so the same design
+produces a one-to-one Blueprint without introducing another workflow.
 
-## DD-005: Delete lifecycle
+## DD-006: Delete lifecycle
 
 Automatic Package disappearance must not automatically delete a companion
 Registration or Agent Identity. Registry Sync inventory may be incomplete
@@ -396,7 +600,7 @@ Use this reconciliation sequence:
 7. Delete the Agent Identity only under separate approval, and only when it
    was created for this source and no remaining Registration, runtime binding,
    grant, policy, or other consumer depends on it.
-8. Retain the platform Blueprint unless its own separately approved retirement
+8. Retain the mapped group Blueprint unless its own separately approved retirement
    process proves that it is no longer shared or needed. Blueprint deletion is
    not normal per-agent cleanup.
 9. Preserve a tombstone in the durable mapping with the source key, former
@@ -423,8 +627,8 @@ to its documented semantics. Do not recreate the Registration as recovery.
 
 The three parts are read top to bottom in the same order as the add flow. The
 write order is deliberately the reverse: the companion Registration is always
-deleted before the Agent Identity, and the platform Blueprint is never part of
-per-agent cleanup. The ordered execution block at the bottom carries that
+deleted before the Agent Identity, and the mapped group Blueprint is never part
+of per-agent cleanup. The ordered execution block at the bottom carries that
 constraint.
 
 ```mermaid
@@ -454,7 +658,7 @@ flowchart TB
 
     subgraph PART1["<b>PART 1: BLUEPRINT</b> - retained"]
         direction TB
-        C1["Shared platform scope:<br/>retain the Blueprint and<br/>exclude it from cleanup"]
+        C1["Mapped group scope:<br/>retain the Blueprint and<br/>exclude it from cleanup"]
     end
 
     subgraph PART2["<b>PART 2: AGENT IDENTITY</b> - decide disposition"]
@@ -512,9 +716,9 @@ flowchart TB
 
 The destructive path uses only IDs recovered from the locked mapping.
 Registration deletion always precedes Agent Identity deletion. The shared
-platform Blueprint is not part of per-agent cleanup.
+or dedicated group Blueprint is not part of per-agent cleanup.
 
-## DD-006: Rename lifecycle
+## DD-007: Rename lifecycle
 
 A provider-side display-name change does not change the agent's identity when
 the DD-003 scoped provider source key remains exactly the same. Rename is an
@@ -528,7 +732,7 @@ Use this reconciliation sequence:
    source key. Do not match by display name.
 3. If the source key is unchanged and only the Package/provider display name
    changed, record `rename-observed` and update `sourceDisplayName`.
-4. Keep the existing platform Blueprint, Agent Identity ID, companion source
+4. Keep the existing mapped group Blueprint, Agent Identity ID, companion source
    ID, and companion Registration ID.
 5. Calculate the intended companion display name from the new source display
    name and the companion display-name convention. Do not reconstruct or

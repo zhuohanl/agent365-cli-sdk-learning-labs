@@ -18,6 +18,10 @@
 #   AgentRegistration.Read.All
 #
 # Keep tenant ID and client ID in the shared ignored ../../.env.
+#
+# Save only the R4 status and safe response-shape summary under:
+# ../../evidence/experiments/01-package-registration-lookup/
+# Never save authentication responses or the raw tenant-wide collection.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
@@ -32,6 +36,8 @@
 #
 # A 400 response mentioning invalid_scope or consent means the app is not
 # configured or consented for AgentRegistration.Read.All.
+#
+# Never save this response.
 
 # @name registrationDeviceCode
 POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
@@ -89,6 +95,9 @@ grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{cl
 #
 # Do not save or share a successful response body because it can contain all
 # tenant registration identifiers and metadata.
+#
+# Save only the HTTP status and safe response-shape summary as a JSON object:
+# ../../evidence/experiments/01-package-registration-lookup/undocumented-collection-probe.json
 
 # @name listAgentRegistrationsProbe
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations

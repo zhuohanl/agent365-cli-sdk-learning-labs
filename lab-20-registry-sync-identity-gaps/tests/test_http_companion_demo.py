@@ -32,6 +32,12 @@ COMPANION_SOURCE_CREATE_EXPERIMENT = (
     / "03-companion-source-registration-create"
     / "experiment.http"
 )
+PACKAGE_BLUEPRINT_LOOKUP_EXPERIMENT = (
+    HTTP_ROOT
+    / "experiments"
+    / "06-package-blueprint-lookup"
+    / "experiment.http"
+)
 
 
 def named_blocks(text):
@@ -44,12 +50,42 @@ def named_blocks(text):
 
 
 class HttpExperimentStructureTests(unittest.TestCase):
+    def test_custom_public_client_flows_do_not_use_aad_v2_token(self):
+        for path in HTTP_ROOT.rglob("*.http"):
+            if "evidence" in path.parts or path.name.endswith(".local.http"):
+                continue
+            self.assertNotIn(
+                "$aadV2Token", path.read_text(encoding="utf-8"), path
+            )
+
     def test_package_lookup_tries_both_candidate_ids(self):
         text = PACKAGE_LOOKUP_EXPERIMENT.read_text(encoding="utf-8")
         blocks = named_blocks(text)
         self.assertIn("getRegistrationUsingPackageIdNegativeProbe", blocks)
         self.assertIn("getRegistrationUsingProviderSourceIdNegativeProbe", blocks)
         self.assertIn("A365_SAMPLE_SOURCE_AGENT_ID_PATH", text)
+        self.assertIn(
+            "projects%252Fdemo%252Flocations%252Ftest"
+            "%252FreasoningEngines%252F123",
+            text,
+        )
+        self.assertIn(
+            "the value was only single\n# encoded and was split into several URL segments",
+            text,
+        )
+        self.assertIn(
+            "[uri]::EscapeDataString((Read-Host 'Paste SourceAgentId').Trim()) "
+            "| Set-Clipboard",
+            text,
+        )
+        self.assertIn(
+            "https://gchq.github.io/CyberChef/#help=URL_Encode",
+            text,
+        )
+        self.assertIn(
+            "Do not paste a real SourceAgentId",
+            text,
+        )
 
     def test_provider_source_create_omits_identity_fields(self):
         text = PROVIDER_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
@@ -58,6 +94,82 @@ class HttpExperimentStructureTests(unittest.TestCase):
         self.assertNotIn('"agentIdentityBlueprintId"', create)
         self.assertNotIn('"agentIdentityId"', create)
 
+    def test_provider_source_create_names_evidence_for_every_result(self):
+        text = PROVIDER_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        excluded = {"correlationDeviceCode", "correlationToken", "currentUser"}
+        evidence_root = (
+            "../../evidence/experiments/"
+            "02-provider-source-registration-create/"
+        )
+        for name, block in blocks.items():
+            if name in excluded:
+                continue
+            self.assertIn(evidence_root, block, name)
+        self.assertIn(
+            "Never save the device-code, token, or\n# /me responses.",
+            text,
+        )
+
+    def test_every_experiment_names_evidence_for_observation_requests(self):
+        cases = {
+            PACKAGE_LOOKUP_EXPERIMENT: {
+                "startDeviceCode",
+                "exchangeDeviceCode",
+            },
+            PACKAGE_LOOKUP_EXPERIMENT.with_name(
+                "undocumented-collection-probe.http"
+            ): {
+                "registrationDeviceCode",
+                "registrationToken",
+            },
+            PROVIDER_SOURCE_CREATE_EXPERIMENT: {
+                "correlationDeviceCode",
+                "correlationToken",
+                "currentUser",
+            },
+            COMPANION_SOURCE_CREATE_EXPERIMENT: {
+                "exp3DeviceCode",
+                "exp3Token",
+                "exp3CurrentUser",
+            },
+            SOURCE_ID_STABILITY_DEMO: {
+                "stabilityStartDeviceCode",
+                "stabilityExchangeDeviceCode",
+                "stabilityCurrentUser",
+            },
+            HTTP_ROOT
+            / "experiments"
+            / "05-enterprise-interaction-history"
+            / "experiment.http": {
+                "interactionHistoryStartDeviceCode",
+                "interactionHistoryDelegatedToken",
+                "interactionHistoryCurrentUser",
+                "acquireEnterpriseInteractionsAppToken",
+            },
+            PACKAGE_BLUEPRINT_LOOKUP_EXPERIMENT: {
+                "blueprintLookupStartDeviceCode",
+                "blueprintLookupToken",
+            },
+        }
+        for path, excluded in cases.items():
+            text = path.read_text(encoding="utf-8")
+            for name, block in named_blocks(text).items():
+                if name in excluded:
+                    continue
+                self.assertTrue(
+                    "evidence/experiments/" in block
+                    or "SAVE REQUIRED" in block,
+                    f"{path}: {name}",
+                )
+
+        stability = SOURCE_ID_STABILITY_DEMO.read_text(encoding="utf-8")
+        self.assertNotIn("evidence/source-id-stability/", stability)
+        self.assertIn(
+            "evidence/experiments/04-source-id-stability/",
+            stability,
+        )
+
     def test_companion_source_create_includes_identity_fields(self):
         text = COMPANION_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
         create = named_blocks(text)["exp3CreateCompanion"]
@@ -65,11 +177,181 @@ class HttpExperimentStructureTests(unittest.TestCase):
             '"sourceAgentId": "agent-governance:companion:v1:gcp:{{providerSourceAgentId}}"',
             create,
         )
-        self.assertIn('"agentIdentityBlueprintId": "{{blueprintAppId}}"', create)
-        self.assertIn('"agentIdentityId": "{{agentIdentityId}}"', create)
+        self.assertIn(
+            '"agentIdentityBlueprintId": '
+            '"{{exp3GetCreatedBlueprint.response.body.$.appId}}"',
+            create,
+        )
+        self.assertIn(
+            '"agentIdentityId": '
+            '"{{exp3GetCreatedAgentIdentity.response.body.$.id}}"',
+            create,
+        )
+        readback = named_blocks(text)["exp3GetCreatedCompanion"]
+        self.assertIn(
+            "GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/"
+            "{{createdRegistrationIdPath}}",
+            readback,
+        )
+        self.assertIn(
+            "[uri]::EscapeDataString((Read-Host 'Paste Registration id').Trim()) "
+            "| Set-Clipboard",
+            readback,
+        )
+        self.assertIn(
+            "A365_EXP3_CREATED_REGISTRATION_ID_PATH="
+            "<path-safe-created-registration-id>",
+            readback,
+        )
+        self.assertIn(
+            "Step 3.12 - Convert the returned Registration ID and read it back",
+            readback,
+        )
+        self.assertIn(
+            "Keep the provider source\n# value unchanged",
+            readback,
+        )
+
+    def test_companion_source_create_discovers_package_before_preflight(self):
+        text = COMPANION_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        self.assertLess(
+            list(blocks).index("exp3ListPackages"),
+            list(blocks).index("exp3PackageBefore"),
+        )
+        list_block = blocks["exp3ListPackages"]
+        self.assertIn(
+            "../../evidence/experiments/03-companion-source-registration-create/"
+            "package-list-page-1.json",
+            list_block,
+        )
+        self.assertIn("@odata.nextLink", list_block)
+        self.assertIn(
+            "A365_EXP3_TARGET_NAME=<exact-selected-package-displayName>",
+            list_block,
+        )
+        self.assertIn(
+            "A365_EXP3_PACKAGE_ID=<exact-selected-package-id>",
+            list_block,
+        )
+        package_block = blocks["exp3PackageBefore"]
+        self.assertIn(
+            "Before copying any value, save the complete response as:",
+            package_block,
+        )
+        self.assertIn(
+            "../../evidence/experiments/03-companion-source-registration-create/"
+            "package-before-create.json",
+            package_block,
+        )
+        for key in (
+            "A365_EXP3_PROVIDER_SOURCE_AGENT_ID",
+            "A365_EXP3_SOURCE_CREATED_AT",
+            "A365_EXP3_SOURCE_MODIFIED_AT",
+        ):
+            self.assertIn(key, package_block)
+
+    def test_companion_source_create_builds_complete_identity_chain(self):
+        text = COMPANION_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        names = list(blocks)
+        expected_chain = [
+            "exp3PackageBefore",
+            "exp3CreateBlueprint",
+            "exp3GetCreatedBlueprint",
+            "exp3GetBlueprintPrincipal",
+            "exp3CreateBlueprintPrincipal",
+            "exp3VerifyBlueprintPrincipal",
+            "exp3CreateAgentIdentity",
+            "exp3GetCreatedAgentIdentity",
+            "exp3CreateCompanion",
+            "exp3GetCreatedCompanion",
+            "exp3ListPackagesAfter",
+            "exp3OriginalPackageAfter",
+            "exp3CompanionPackageAfter",
+        ]
+        positions = [names.index(name) for name in expected_chain]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn(
+            '"agentIdentityBlueprintId": '
+            '"{{exp3GetCreatedBlueprint.response.body.$.appId}}"',
+            blocks["exp3CreateAgentIdentity"],
+        )
+        self.assertIn(
+            '"appId": "{{exp3GetCreatedBlueprint.response.body.$.appId}}"',
+            blocks["exp3CreateBlueprintPrincipal"],
+        )
+        header = text[: text.index("@tenantId")]
+        self.assertIn("A365_EXP3_BLUEPRINT_GROUP=", header)
+        self.assertNotIn("A365_EXP3_BLUEPRINT_OBJECT_ID=", header)
+        self.assertNotIn("A365_EXP3_BLUEPRINT_APP_ID=", header)
+        self.assertNotIn("A365_EXP3_AGENT_IDENTITY_ID=", header)
+        self.assertIn(
+            "no approved reusable Blueprint is recorded",
+            blocks["exp3CreateBlueprint"],
+        )
+        self.assertIn(
+            "AgentIdentityBlueprintPrincipal.Create",
+            text,
+        )
+
+    def test_companion_source_create_compares_both_packages(self):
+        text = COMPANION_SOURCE_CREATE_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        package_list = blocks["exp3ListPackagesAfter"]
+        self.assertIn(
+            "package-list-after-create-page-1.json",
+            package_list,
+        )
+        self.assertIn("@odata.nextLink", package_list)
+        self.assertIn(
+            "must not assume its Package ID equals the Registration ID",
+            package_list,
+        )
+        self.assertIn(
+            "A365_EXP3_CREATED_PACKAGE_ID=<new-companion-package-id>",
+            package_list,
+        )
+        self.assertIn(
+            "/packages/{{packageId}}",
+            blocks["exp3OriginalPackageAfter"],
+        )
+        self.assertIn(
+            "/packages/{{createdPackageId}}",
+            blocks["exp3CompanionPackageAfter"],
+        )
+
+    def test_package_blueprint_lookup_chains_response_ids(self):
+        text = PACKAGE_BLUEPRINT_LOOKUP_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        self.assertIn("A365_BLUEPRINT_LOOKUP_PACKAGE_ID", text)
+        self.assertIn(
+            "{{blueprintLookupPackage.response.body.$.agentIdentityId}}",
+            blocks["blueprintLookupAgentIdentityByObjectId"],
+        )
+        self.assertIn(
+            "(appId='{{blueprintLookupPackage.response.body.$."
+            "agentIdentityId}}')",
+            blocks["blueprintLookupAgentIdentityByAppId"],
+        )
+        self.assertIn(
+            "{{blueprintLookupAgentIdentityByObjectId.response.body.$."
+            "agentIdentityBlueprintId}}",
+            blocks["blueprintLookupPrincipalFromObjectId"],
+        )
+        self.assertIn(
+            "{{blueprintLookupAgentIdentityByAppId.response.body.$."
+            "agentIdentityBlueprintId}}",
+            blocks["blueprintLookupPrincipalFromAppId"],
+        )
+        self.assertNotRegex(
+            text, r"(?im)^(POST|PATCH|DELETE)\s+\{\{graphBaseUrl\}\}"
+        )
 
     def test_demo_order_keeps_delete_last(self):
-        readme = (HTTP_ROOT / "http-experiments.md").read_text(encoding="utf-8")
+        readme = (HTTP_ROOT / "docs" / "http-experiments.md").read_text(
+            encoding="utf-8"
+        )
         self.assertLess(
             readme.index("demos/01-add-companion"),
             readme.index("demos/02-rename-companion"),
@@ -85,38 +367,73 @@ class HttpCompanionDemoTests(unittest.TestCase):
     def setUpClass(cls):
         cls.text = DEMO.read_text(encoding="utf-8")
 
-    def test_uses_rest_client_cached_delegated_token(self):
-        self.assertIn("@readAccessToken = {{$aadV2Token scopes:", self.text)
-        self.assertIn("@writeAccessToken = {{$aadV2Token new scopes:", self.text)
-        self.assertIn("tenantId:{{tenantId}}", self.text)
-        self.assertIn("clientId:{{clientId}}", self.text)
-        self.assertNotIn("/oauth2/v2.0/devicecode", self.text)
-        self.assertNotIn("/oauth2/v2.0/token", self.text)
+    def test_uses_explicit_device_code_with_configured_tenant_and_client(self):
+        self.assertIn(
+            "POST https://login.microsoftonline.com/{{tenantId}}"
+            "/oauth2/v2.0/devicecode",
+            self.text,
+        )
+        self.assertIn(
+            "POST https://login.microsoftonline.com/{{tenantId}}"
+            "/oauth2/v2.0/token",
+            self.text,
+        )
+        self.assertIn("client_id={{clientId}}&scope={{demoScopes}}", self.text)
+        self.assertIn(
+            "device_code={{demoStartDeviceCode.response.body.$.device_code}}",
+            self.text,
+        )
+        self.assertNotIn("$aadV2Token", self.text)
         self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")
 
-    def test_read_only_route_does_not_request_write_token(self):
-        blocks = named_blocks(self.text)
-        write_requests = {"demoCreateFreshCompanion", "demoDeleteExistingCompanion"}
+    def test_explains_manual_target_name_and_optional_pagination(self):
+        self.assertIn(
+            "Before Prep 1, open ../../.env and set:",
+            self.text,
+        )
+        self.assertIn(
+            "A365_DEMO_TARGET_NAME=<exact displayName of the selected GCP agent>",
+            self.text,
+        )
+        self.assertIn(
+            "If @odata.nextLink is absent, the list is complete.",
+            self.text,
+        )
+        self.assertIn(
+            "If @odata.nextLink is present, the server has split the Package list",
+            self.text,
+        )
 
+    def test_graph_requests_use_the_explicit_token_response(self):
+        blocks = named_blocks(self.text)
         for name, block in blocks.items():
-            expected_token = "writeAccessToken" if name in write_requests else "readAccessToken"
-            self.assertIn(f"Authorization: Bearer {{{{{expected_token}}}}}", block)
+            if name in {"demoStartDeviceCode", "demoToken"}:
+                continue
+            self.assertIn(
+                "Authorization: Bearer "
+                "{{demoToken.response.body.$.access_token}}",
+                block,
+            )
 
     def test_requests_follow_the_notebook_demo_order(self):
         names = re.findall(r"(?m)^# @name (\S+)$", self.text)
         expected = [
+            "demoStartDeviceCode",
+            "demoToken",
             "demoCurrentUser",
             "demoListPackages",
+            "demoGetSelectedPackage",
+            "demoGetExistingBlueprint",
+            "demoCreateBlueprint",
             "demoGetBlueprint",
             "demoGetBlueprintPrincipal",
-            "demoGetOriginalPackageBefore",
-            "demoGetAgentIdentity",
-            "demoGetExistingCompanion",
+            "demoCreateBlueprintPrincipal",
+            "demoVerifyBlueprintPrincipal",
+            "demoCreateAgentIdentity",
+            "demoGetNewAgentIdentity",
             "demoCreateFreshCompanion",
             "demoGetNewCompanion",
             "demoGetOriginalPackageAfter",
-            "demoDeleteExistingCompanion",
-            "demoConfirmCompanionDeleted",
         ]
         self.assertEqual(names, expected)
 
@@ -127,15 +444,110 @@ class HttpCompanionDemoTests(unittest.TestCase):
         )
         create_block = named_blocks(self.text)["demoCreateFreshCompanion"]
         self.assertNotIn("committed-fleet:companion", create_block)
-        self.assertIn('"agentIdentityBlueprintId": "{{blueprintAppId}}"', self.text)
-        self.assertIn('"agentIdentityId": "{{agentIdentityId}}"', self.text)
+        self.assertIn(
+            '"agentIdentityBlueprintId": "{{blueprintAppId}}"',
+            create_block,
+        )
+        self.assertIn(
+            '"agentIdentityId": '
+            '"{{demoCreateAgentIdentity.response.body.$.id}}"',
+            create_block,
+        )
         self.assertIn('"createdBy": "{{demoCurrentUser.response.body.$.id}}"', self.text)
 
-    def test_write_requests_are_explicitly_optional(self):
-        self.assertIn("DO NOT SEND THIS REQUEST during the normal customer demo.", self.text)
-        self.assertIn("On timeout, 5xx, or another unexpected response, stop.", self.text)
-        self.assertIn("Cleanup - OPTIONAL and irreversible", self.text)
+    def test_requires_target_and_group_with_optional_reuse_id(self):
+        header = self.text[: self.text.index("@tenantId")]
+        self.assertIn("A365_DEMO_TARGET_NAME=", header)
+        self.assertIn("A365_DEMO_BLUEPRINT_GROUP=", header)
+        self.assertIn("A365_DEMO_BLUEPRINT_OBJECT_ID is optional", header)
+        for generated in (
+            "A365_DEMO_ORIGINAL_PACKAGE_ID=",
+            "A365_DEMO_PROVIDER_SOURCE_AGENT_ID=",
+            "A365_DEMO_SOURCE_CREATED_AT=",
+            "A365_DEMO_SOURCE_MODIFIED_AT=",
+            "A365_DEMO_BLUEPRINT_APP_ID=",
+            "A365_DEMO_AGENT_IDENTITY_ID=",
+            "A365_DEMO_COMPANION_REGISTRATION_ID=",
+        ):
+            self.assertNotIn(generated, header)
+
+    def test_identity_create_uses_blueprint_and_operator_as_sponsor(self):
+        create = named_blocks(self.text)["demoCreateAgentIdentity"]
+        self.assertIn(
+            '"agentIdentityBlueprintId": "{{blueprintAppId}}"',
+            create,
+        )
+        self.assertIn("{{demoCurrentUser.response.body.$.id}}", create)
+
+    def test_blueprint_reuse_or_create_is_resolved_before_identity(self):
+        reuse = self.text.index("# @name demoGetExistingBlueprint")
+        blueprint_stop = self.text.index(
+            "# Stop 1A - Approve creation of one group Blueprint"
+        )
+        blueprint_post = self.text.index("# @name demoCreateBlueprint")
+        helper = self.text.index("prepare_demo.py blueprint")
+        verified = self.text.index("# @name demoGetBlueprint")
+        identity_post = self.text.index("# @name demoCreateAgentIdentity")
+        self.assertLess(reuse, blueprint_stop)
+        self.assertLess(blueprint_stop, blueprint_post)
+        self.assertLess(blueprint_post, helper)
+        self.assertLess(helper, verified)
+        self.assertLess(verified, identity_post)
+
+        create = named_blocks(self.text)["demoCreateBlueprint"]
+        self.assertIn(
+            '"displayName": "GoogleVertexAI - {{blueprintGroup}} '
+            '- disposable Blueprint"',
+            create,
+        )
+        self.assertIn('"sponsors@odata.bind":', create)
+        self.assertIn('"owners@odata.bind":', create)
+
+    def test_blueprint_principal_has_read_create_verify_flow(self):
+        read = self.text.index("# @name demoGetBlueprintPrincipal")
+        stop = self.text.index(
+            "# Stop 1B - Approve creation of the Blueprint principal"
+        )
+        create = self.text.index("# @name demoCreateBlueprintPrincipal")
+        verify = self.text.index("# @name demoVerifyBlueprintPrincipal")
+        self.assertLess(read, stop)
+        self.assertLess(stop, create)
+        self.assertLess(create, verify)
+        self.assertIn(
+            '"appId": "{{blueprintAppId}}"',
+            named_blocks(self.text)["demoCreateBlueprintPrincipal"],
+        )
+
+    def test_write_requests_follow_separate_stop_gates(self):
+        stop_two = self.text.index("# Stop 2 - Approve one Agent Identity creation")
+        identity_post = self.text.index("# @name demoCreateAgentIdentity")
+        stop_three = self.text.index(
+            "# Stop 3 - Approve one companion Registration creation"
+        )
+        registration_post = self.text.index(
+            "\nPOST {{graphBaseUrl}}/beta/copilot/agentRegistrations"
+        )
+        self.assertLess(stop_two, identity_post)
+        self.assertLess(identity_post, stop_three)
+        self.assertLess(stop_three, registration_post)
+        self.assertGreaterEqual(
+            self.text.count(
+                "On timeout, 5xx, or another unexpected response, stop"
+            ),
+            4,
+        )
         self.assertIn('Never use "Send All".', self.text)
+
+    def test_finalize_persists_generated_ids(self):
+        self.assertIn("prepare_demo.py finalize", self.text)
+        self.assertIn("mapping.json", self.text)
+        for generated in (
+            "A365_DEMO_BLUEPRINT_OBJECT_ID",
+            "A365_DEMO_BLUEPRINT_APP_ID",
+            "A365_DEMO_AGENT_IDENTITY_ID",
+            "A365_DEMO_COMPANION_REGISTRATION_ID",
+        ):
+            self.assertIn(generated, self.text)
 
 
 class HttpCompanionRenameDemoTests(unittest.TestCase):
@@ -147,6 +559,8 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
     def test_requests_follow_capture_compare_rename_order(self):
         names = list(self.blocks)
         expected = [
+            "renameStartDeviceCode",
+            "renameToken",
             "renameCurrentUser",
             "renameListPackagesBefore",
             "renameGetPackageBefore",
@@ -185,22 +599,24 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             self.assertNotIn('"agentIdentityId":', block)
             self.assertNotIn('"agentIdentityBlueprintId":', block)
 
-    def test_only_patch_requests_use_rename_write_token(self):
-        write_requests = {
-            "renamePatchIdentity",
-            "renamePatchRegistration",
-            "renameRollbackIdentity",
-            "renameRollbackRegistration",
-        }
+    def test_graph_requests_use_explicit_rename_token(self):
         for name, block in self.blocks.items():
-            expected_token = (
-                "renameWriteToken" if name in write_requests else "readAccessToken"
+            if name in {"renameStartDeviceCode", "renameToken"}:
+                continue
+            self.assertIn(
+                "Authorization: Bearer "
+                "{{renameToken.response.body.$.access_token}}",
+                block,
             )
-            self.assertIn(f"Authorization: Bearer {{{{{expected_token}}}}}", block)
 
     def test_rename_file_contains_no_literal_credentials(self):
-        self.assertNotIn("/oauth2/v2.0/devicecode", self.text)
-        self.assertNotIn("/oauth2/v2.0/token", self.text)
+        self.assertIn(
+            "client_id={{clientId}}&scope={{renameScopes}}", self.text
+        )
+        self.assertIn(
+            "device_code={{renameStartDeviceCode.response.body.$.device_code}}",
+            self.text,
+        )
         self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")
         self.assertIn('Never use "Send All".', self.text)
 
@@ -214,6 +630,8 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
     def test_requests_follow_proof_then_retirement_order(self):
         names = list(self.blocks)
         expected = [
+            "deleteStartDeviceCode",
+            "deleteToken",
             "deleteCurrentUser",
             "deleteListPackagesBefore",
             "deleteGetOriginalPackageBefore",
@@ -245,17 +663,15 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
         self.assertLess(registration_delete, stop_b)
         self.assertLess(stop_b, identity_delete)
 
-    def test_delete_tokens_are_scoped_to_destructive_requests(self):
+    def test_graph_requests_use_explicit_delete_token(self):
         for name, block in self.blocks.items():
-            if name == "deleteCompanionRegistration":
-                token = "registrationDeleteToken"
-            elif name == "deleteAgentIdentity":
-                token = "identityDeleteToken"
-            elif name == "deleteGetIdentityAppRoleAssignments":
-                token = "dependencyReadToken"
-            else:
-                token = "readAccessToken"
-            self.assertIn(f"Authorization: Bearer {{{{{token}}}}}", block)
+            if name in {"deleteStartDeviceCode", "deleteToken"}:
+                continue
+            self.assertIn(
+                "Authorization: Bearer "
+                "{{deleteToken.response.body.$.access_token}}",
+                block,
+            )
 
     def test_delete_retains_blueprint_and_mapping_tombstone(self):
         self.assertNotRegex(
@@ -267,8 +683,13 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
         self.assertIn("Agent Identity deletion is soft deletion", self.text)
 
     def test_delete_file_contains_no_literal_credentials(self):
-        self.assertNotIn("/oauth2/v2.0/devicecode", self.text)
-        self.assertNotIn("/oauth2/v2.0/token", self.text)
+        self.assertIn(
+            "client_id={{clientId}}&scope={{deleteScopes}}", self.text
+        )
+        self.assertIn(
+            "device_code={{deleteStartDeviceCode.response.body.$.device_code}}",
+            self.text,
+        )
         self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")
         self.assertIn('Never use "Send All".', self.text)
 
@@ -370,7 +791,7 @@ class HttpCompanionSourceIdStabilityDemoTests(unittest.TestCase):
 
     def test_recreate_uses_original_agent_studio_workflow(self):
         self.assertIn(
-            "phase-3-portal-recreation-checklist.txt",
+            "phase-3-portal-recreation-checklist.json",
             self.text,
         )
         self.assertIn(
@@ -391,6 +812,14 @@ class HttpCompanionSourceIdStabilityDemoTests(unittest.TestCase):
         for name, block in self.blocks.items():
             marker = "DO NOT SAVE" if name in do_not_save else "SAVE REQUIRED"
             self.assertIn(marker, block, name)
+
+    def test_all_saved_experiment_results_are_json(self):
+        for path in (HTTP_ROOT / "experiments").rglob("*.http"):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"(?i)evidence.*\.txt")
+            self.assertNotRegex(text, r"(?i)SAVE REQUIRED:[^\n]*\.txt")
+            self.assertNotIn("or an ignored screenshot", text)
+            self.assertNotIn("or ignored screenshots", text)
 
     def test_file_contains_no_literal_credentials(self):
         self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")

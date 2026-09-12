@@ -44,18 +44,43 @@
 @newTargetName = {{$dotenv A365_RENAME_NEW_TARGET_NAME}}
 @afterPackageId = {{$dotenv A365_RENAME_AFTER_PACKAGE_ID}}
 @graphBaseUrl = https://graph.microsoft.com
-@readAccessToken = {{$aadV2Token scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentRegistration.Read.All tenantId:{{tenantId}} clientId:{{clientId}}}}
-@renameWriteToken = {{$aadV2Token new scopes:https://graph.microsoft.com/User.Read,https://graph.microsoft.com/CopilotPackages.Read.All,https://graph.microsoft.com/AgentIdentity.Read.All,https://graph.microsoft.com/AgentIdentity.ReadWrite.All,https://graph.microsoft.com/AgentRegistration.Read.All,https://graph.microsoft.com/AgentRegistration.ReadWrite.All tenantId:{{tenantId}} clientId:{{clientId}}}}
+@renameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+
+###############################################################################
+# Authentication 1 - Request a device code
+#
+# Never save this response.
+
+# @name renameStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{renameScopes}}
+
+###
+
+###############################################################################
+# Authentication 2 - Exchange the device code after browser sign-in
+#
+# Never save this response.
+
+# @name renameToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{renameStartDeviceCode.response.body.$.device_code}}
+
+###
 
 ###############################################################################
 # Part 1.1 - Confirm the signed-in operator
 #
-# Sending this request triggers REST Client's browser-assisted delegated sign
-# in. Expected: 200. Keep the returned user ID private.
+# Send after Authentication 2 succeeds. Expected: 200.
+# Keep the returned user ID private.
 
 # @name renameCurrentUser
 GET {{graphBaseUrl}}/v1.0/me?$select=id
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -69,7 +94,7 @@ Accept: application/json
 
 # @name renameListPackagesBefore
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -89,7 +114,7 @@ Accept: application/json
 
 # @name renameGetPackageBefore
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -102,7 +127,7 @@ Accept: application/json
 
 # @name renameGetIdentityBefore
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -121,7 +146,7 @@ Accept: application/json
 
 # @name renameGetRegistrationBefore
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
 
@@ -152,7 +177,7 @@ OData-Version: 4.0
 
 # @name renameListPackagesAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -164,7 +189,7 @@ Accept: application/json
 
 # @name renameGetPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{afterPackageId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -201,7 +226,7 @@ Accept: application/json
 
 # @name renamePatchIdentity
 PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{renameWriteToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
 
@@ -218,7 +243,7 @@ Accept: application/json
 
 # @name renameGetIdentityAfter
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -234,7 +259,7 @@ Accept: application/json
 
 # @name renamePatchRegistration
 PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{renameWriteToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
 OData-Version: 4.0
@@ -253,7 +278,7 @@ OData-Version: 4.0
 
 # @name renameGetRegistrationAfter
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 OData-Version: 4.0
 
@@ -267,7 +292,7 @@ OData-Version: 4.0
 
 # @name renameListPackagesFinal
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
-Authorization: Bearer {{readAccessToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -296,7 +321,7 @@ Accept: application/json
 
 # @name renameRollbackIdentity
 PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
-Authorization: Bearer {{renameWriteToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
 
@@ -313,7 +338,7 @@ Accept: application/json
 
 # @name renameRollbackRegistration
 PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationId}}
-Authorization: Bearer {{renameWriteToken}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
 Content-Type: application/json
 Accept: application/json
 OData-Version: 4.0

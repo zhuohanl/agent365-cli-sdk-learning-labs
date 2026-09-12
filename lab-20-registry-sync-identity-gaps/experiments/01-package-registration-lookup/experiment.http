@@ -11,6 +11,9 @@
 # Never commit .env, response files, access tokens, package IDs, agent names,
 # tenant IDs, client IDs, endpoints, or other identifiers.
 #
+# Save non-authentication results only under:
+# ../../evidence/experiments/01-package-registration-lookup/
+#
 # If Send Request appears to do nothing, confirm that .env exists in the
 # Lab 20 root and contains non-placeholder values for A365_TENANT_ID and
 # A365_CLIENT_ID.
@@ -43,7 +46,8 @@
 #     "message": "..."
 #   }
 #
-# Do not copy either code into chat or tracked evidence.
+# Do not copy either code into chat or tracked evidence. Never save this
+# response.
 
 # @name startDeviceCode
 POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
@@ -129,6 +133,12 @@ grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{cl
 # 3. Follow @odata.nextLink if the response is paginated.
 #
 # Do not assume package id, assetId, or displayName is an Agent Registration ID.
+#
+# Save the response as:
+# ../../evidence/experiments/01-package-registration-lookup/package-list.json
+#
+# If @odata.nextLink is present, save later pages as package-list-2.json,
+# package-list-3.json, and so on in the same evidence directory.
 
 # @name listPackages
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
@@ -191,6 +201,9 @@ Accept: application/json
 #
 # SAVE REQUIRED: status and safe error class only. The documented Registration
 # GET expects a Registration ID, so this is a bounded negative probe.
+#
+# Save a JSON object containing the HTTP status and safe error class in:
+# ../../evidence/experiments/01-package-registration-lookup/package-id-registration-probe.json
 
 # @name getRegistrationUsingPackageIdNegativeProbe
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{samplePackageId}}
@@ -206,11 +219,49 @@ Accept: application/json
 # observed source already contains percent escapes, encode each percent sign
 # for the path, for example %2f becomes %252f.
 #
+# Synthetic example:
+#
+# Package Details value:
+#   projects%2Fdemo%2Flocations%2Ftest%2FreasoningEngines%2F123
+#
+# A365_SAMPLE_SOURCE_AGENT_ID_PATH value:
+#   projects%252Fdemo%252Flocations%252Ftest%252FreasoningEngines%252F123
+#
+# Do not URL-decode the Package Details value first. REST Client processes one
+# encoding layer while constructing the request URL. If Graph returns
+# "Resource not found for the segment '123'", the value was only single
+# encoded and was split into several URL segments. Correct the ignored .env,
+# reload REST Client, and rerun this read-only probe once.
+#
+# Safe local conversion on Windows:
+#
+# 1. Copy and run this one-line command in PowerShell:
+#
+# [uri]::EscapeDataString((Read-Host 'Paste SourceAgentId').Trim()) | Set-Clipboard
+#
+# 2. When PowerShell displays the prompt, copy the exact SourceAgentId from the
+#    ignored Package Details response and paste it into the prompt.
+# 3. Press Enter. The command replaces the clipboard with the path-safe value
+#    without printing the converted identifier.
+# 4. Paste the converted value into A365_SAMPLE_SOURCE_AGENT_ID_PATH.
+#
+# For learning with the synthetic example only, CyberChef provides a public
+# URL Encode operation:
+#
+# https://gchq.github.io/CyberChef/#help=URL_Encode
+#
+# Do not paste a real SourceAgentId, Package ID, tenant value, or other
+# experiment identifier into any public website. The local PowerShell method
+# is the required method for real evidence.
+#
 # SAVE REQUIRED: status and safe error class only.
+#
+# Save a JSON object containing the HTTP status and safe error class in:
+# ../../evidence/experiments/01-package-registration-lookup/provider-source-registration-probe.json
 
 # @name getRegistrationUsingProviderSourceIdNegativeProbe
 GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{sampleSourceAgentIdPath}}
-Authorization: ******
+Authorization: Bearer {{exchangeDeviceCode.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -220,6 +271,9 @@ Accept: application/json
 #
 # Do not use this filter as proof that every returned GoogleVertexAI Package
 # came from Registry Sync.
+#
+# If sent, save the response as:
+# ../../evidence/experiments/01-package-registration-lookup/google-vertex-packages.json
 
 # @name listGoogleVertexPackages
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages?$filter=platform eq 'GoogleVertexAI'

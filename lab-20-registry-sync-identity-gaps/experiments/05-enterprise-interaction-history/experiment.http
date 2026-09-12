@@ -38,26 +38,53 @@
 # Do not commit, paste into chat or an issue, or capture identifying
 # screenshots. Save any required raw response only under the ignored evidence
 # directory.
-
+#
+# Evidence directory:
+# ../../evidence/experiments/05-enterprise-interaction-history/
+#
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
 @applicationClientId = {{$dotenv A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_ID}}
 @applicationClientSecretUrlEncoded = {{$dotenv A365_ENTERPRISE_INTERACTIONS_APP_CLIENT_SECRET_URLENCODED}}
 @graphBaseUrl = https://graph.microsoft.com
-@delegatedUserToken = {{$aadV2Token scopes:https://graph.microsoft.com/User.Read tenantId:{{tenantId}} clientId:{{clientId}}}}
+@delegatedUserScope = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20offline_access
 
 ###############################################################################
-# Part 1 - Resolve your own Microsoft Entra user ID
+# Part 1.1 - Request a delegated device code
 #
-# Sending this request triggers REST Client's browser-assisted delegated sign
-# in. Expected: 200.
+# Never save this response.
+
+# @name interactionHistoryStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{delegatedUserScope}}
+
+###
+
+###############################################################################
+# Part 1.2 - Exchange the device code after browser sign-in
+#
+# Never save this response.
+
+# @name interactionHistoryDelegatedToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{interactionHistoryStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Part 1.3 - Resolve your own Microsoft Entra user ID
 #
 # Keep the returned ID private. The next request uses only the ID from this
 # named response; no user ID needs to be copied into the tracked file.
+# Never save this response.
 
 # @name interactionHistoryCurrentUser
 GET {{graphBaseUrl}}/v1.0/me?$select=id
-Authorization: Bearer {{delegatedUserToken}}
+Authorization: Bearer {{interactionHistoryDelegatedToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
@@ -103,6 +130,13 @@ client_id={{applicationClientId}}&client_secret={{applicationClientSecretUrlEnco
 # If @odata.nextLink is present, follow one page at a time using the URL
 # returned by Graph. Do not publish that URL because it can contain sensitive
 # query state.
+#
+# Save the first response as:
+# ../../evidence/experiments/05-enterprise-interaction-history/beta-interactions-page-1.json
+#
+# If @odata.nextLink is present, save later pages as
+# beta-interactions-page-2.json, beta-interactions-page-3.json, and so on in
+# the same ignored evidence directory.
 
 # @name getMyEnterpriseInteractionsBeta
 GET {{graphBaseUrl}}/beta/copilot/users/{{interactionHistoryCurrentUser.response.body.$.id}}/interactionHistory/getAllEnterpriseInteractions
@@ -116,6 +150,11 @@ Accept: application/json
 #
 # Microsoft currently documents both beta and v1.0. Use this only when a
 # stable-version comparison is useful. The recommended page size is 100.
+#
+# If sent, save the first response as:
+# ../../evidence/experiments/05-enterprise-interaction-history/v1-interactions-page-1.json
+#
+# Save any later pages as v1-interactions-page-2.json and so on.
 
 # @name getMyEnterpriseInteractionsV1
 GET {{graphBaseUrl}}/v1.0/copilot/users/{{interactionHistoryCurrentUser.response.body.$.id}}/interactionHistory/getAllEnterpriseInteractions?$top=100

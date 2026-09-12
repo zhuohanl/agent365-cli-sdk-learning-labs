@@ -113,7 +113,7 @@
 # Before Phase 3 deletion, complete the ignored portal recreation checklist:
 #
 # lab-20-registry-sync-identity-gaps/evidence/experiments/04-source-id-stability/
-#   phase-3-portal-recreation-checklist.txt
+#   phase-3-portal-recreation-checklist.json
 #
 # The replacement must be created through the same Google Cloud portal Agent
 # Studio workflow used for the original disposable agent. This file does not
@@ -123,13 +123,15 @@
 #
 # Every step marked SAVE REQUIRED must be saved under:
 #
-#   lab-20-registry-sync-identity-gaps/evidence/source-id-stability/
+#   lab-20-registry-sync-identity-gaps/evidence/experiments/04-source-id-stability/
 #
 # Use the suggested synthetic filename. Save complete response bodies for JSON
 # responses. Graph and GCP error bodies are also JSON, so save the safe response
 # body with a .json extension and record the HTTP status separately in the
-# comparison/checkpoint. Never save an access token, refresh token, device code,
-# or user code as experiment evidence.
+# same JSON result. Manual portal checkpoints must also be JSON objects with
+# the step name, observed time, outcome, and safe notes. Never save screenshots
+# as experiment results. Never save an access token, refresh token, device
+# code, or user code as experiment evidence.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
@@ -287,7 +289,7 @@ Accept: application/json
 # Wait for a successful sync and the agreed propagation period.
 #
 # SAVE REQUIRED: the successful sync status and completion time as
-# phase-0-no-change-sync.txt or an ignored screenshot.
+# phase-0-no-change-sync.json.
 
 # SAVE REQUIRED: stabilityBaselineList2 response body as
 # phase-0-baseline-list-2.json.
@@ -436,7 +438,7 @@ Accept: application/json
 # After a successful sync and propagation period, list every Package page.
 #
 # SAVE REQUIRED: the successful sync status and completion time as
-# phase-1-rename-sync.txt or an ignored screenshot.
+# phase-1-rename-sync.json.
 #
 # SAVE REQUIRED: stabilityRenameList response body as
 # phase-1-package-list-after-rename.json.
@@ -530,7 +532,7 @@ Accept: application/json
 # GCP resource name, trigger Registry Sync, and wait for success.
 #
 # SAVE REQUIRED: the successful sync status and completion time as
-# phase-1-rename-back-sync.txt or an ignored screenshot.
+# phase-1-rename-back-sync.json.
 #
 # SAVE REQUIRED: stabilityRenameBackList response body as
 # phase-1-package-list-after-rename-back.json.
@@ -590,7 +592,7 @@ Accept: application/json
 # Complete the ignored checklist before deleting anything:
 #
 #   evidence/experiments/04-source-id-stability/
-#     phase-2-connection-recreation-checklist.txt
+#     phase-2-connection-recreation-checklist.json
 #
 # Capture privately from Connected platforms:
 # - connection display name and description;
@@ -603,8 +605,8 @@ Accept: application/json
 # The experiment owner has confirmed that this Registry Sync connection remains
 # experimental and has no downstream consumer. If that changes, stop.
 #
-# SAVE REQUIRED: connection configuration and current healthy status as
-# phase-2-connection-before-delete.txt or ignored screenshots.
+# SAVE REQUIRED: safe connection configuration fields and current healthy
+# status as phase-2-connection-before-delete.json.
 #
 # SAVE REQUIRED: stabilityPhase2ListBeforeConnectionDelete response body as
 # phase-2-package-list-before-connection-delete.json.
@@ -634,7 +636,7 @@ Accept: application/json
 # modify the project or region.
 #
 # SAVE REQUIRED: portal deletion confirmation and time as
-# phase-2-connection-delete.txt or an ignored screenshot.
+# phase-2-connection-delete.json.
 #
 # Wait for the documented propagation period before interpreting inventory.
 #
@@ -708,9 +710,9 @@ Accept: application/json
 # Validate credentials, save the connection, trigger a sync, and wait for a
 # successful result plus the propagation period.
 #
-# SAVE REQUIRED: recreated connection configuration, new connection ID, and
-# successful sync result as phase-2-connection-after-recreate.txt or ignored
-# screenshots.
+# SAVE REQUIRED: safe recreated connection configuration fields, connection
+# replacement status, and successful sync result as
+# phase-2-connection-after-recreate.json.
 #
 # SAVE REQUIRED: stabilityPhase2ListAfterConnectionRecreate response body as
 # phase-2-package-list-after-connection-recreate.json.
@@ -794,7 +796,7 @@ Accept: application/json
 #
 # Continue only if:
 # - the target is the approved lab-source-id-stability-disposable Agent Engine;
-# - phase-3-portal-recreation-checklist.txt is complete;
+# - phase-3-portal-recreation-checklist.json is complete;
 # - the Agent Studio instructions, model/runtime choices, tools, dependencies,
 #   region, and other required settings are captured privately;
 # - child resources and runtime dependencies have been reviewed;
@@ -852,7 +854,7 @@ Accept: application/json
 # an observation; this experiment has no companion to retire.
 #
 # SAVE REQUIRED: the successful sync status and completion time as
-# phase-3-source-deletion-sync.txt or an ignored screenshot.
+# phase-3-source-deletion-sync.json.
 #
 # SAVE REQUIRED: stabilityPhase3ListAfterDelete response body as
 # phase-3-package-list-after-source-delete.json.
@@ -896,8 +898,8 @@ Accept: application/json
 # continuing.
 #
 # SAVE REQUIRED: the Agent Studio creation/deployment confirmation and the
-# completion time as phase-3-gcp-replacement-portal.txt or an ignored
-# screenshot. Keep configuration details and identifiers private.
+# completion time as phase-3-gcp-replacement-portal.json. Keep configuration
+# details and identifiers private.
 #
 # Manual checkpoint 3E - capture the replacement resource
 #
@@ -927,7 +929,7 @@ Accept: application/json
 # A365_STABILITY_REPLACEMENT_PACKAGE_ID
 #
 # SAVE REQUIRED: the successful sync status and completion time as
-# phase-3-replacement-sync.txt or an ignored screenshot.
+# phase-3-replacement-sync.json.
 #
 # SAVE REQUIRED: stabilityPhase3ListAfterCreate response body as
 # phase-3-package-list-after-replacement.json.

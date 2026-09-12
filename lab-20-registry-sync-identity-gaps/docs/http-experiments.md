@@ -16,9 +16,28 @@ directories for `.env`, so do not copy credentials into the child folders.
 | `experiments/03-companion-source-registration-create` | Can a distinct companion source ID be registered with a Blueprint and Agent Identity while leaving the Registry Sync Package unchanged? | `evidence/experiments/03-companion-source-registration-create` |
 | `experiments/04-source-id-stability` | Which source, connection, and Package identifiers survive sync, rename, and connection recreation? | `evidence/experiments/04-source-id-stability` |
 | `experiments/05-enterprise-interaction-history` | What interaction-history behavior is exposed for an enterprise agent? | `evidence/experiments/05-enterprise-interaction-history` |
+| `experiments/06-package-blueprint-lookup` | Given a Package ID, which Agent Identity and parent Blueprint does it resolve to? | `evidence/experiments/06-package-blueprint-lookup` |
 
 Run each experiment independently. A result from one selected GCP agent does
 not authorize another write or prove behavior for another provider.
+
+Save every experiment result as JSON under its specified ignored evidence
+directory. Raw JSON response bodies can be saved directly. When a step has no
+body, or only a safe status/error summary should be retained, use:
+
+```json
+{
+  "step": "<request-or-manual-checkpoint-name>",
+  "observedAt": "<UTC-timestamp>",
+  "httpStatus": 204,
+  "outcome": "<supported|unsupported|unavailable|permission-denied|inconclusive>",
+  "body": null,
+  "safeNotes": "<non-identifying-summary>"
+}
+```
+
+Do not save authentication responses. Do not put tokens, tenant values,
+identifiers, endpoints, or identifying screenshots in tracked files.
 
 ## Demos
 
@@ -31,6 +50,30 @@ Run lifecycle demos in this order when they use the same companion:
 Delete is last because it removes the Registration required by the rename
 demo. Each demo remains gated and can instead use a different explicitly
 approved disposable agent selected through `.env`.
+
+Before demo 01, provide the exact GCP Package display name and the approved
+Blueprint group:
+
+```dotenv
+A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
+A365_DEMO_BLUEPRINT_GROUP=<approved-blueprint-group-label>
+```
+
+Set `A365_DEMO_BLUEPRINT_OBJECT_ID` only when protected local mapping identifies
+an approved reusable Blueprint. Otherwise leave it empty. Demo 01 performs
+inventory discovery first, then Part 1 either verifies the recorded Blueprint
+or creates one behind a separate approval gate. Its `blueprint` helper command
+normalizes either result into generated object and app IDs before Parts 2 and 3.
+
+The `demos/01-add-companion/prepare_demo.py` helper derives Package and source
+values from saved read-only responses. After the creates, it saves the ignored
+durable mapping and generated IDs used by demos 02 and 03. It never obtains a
+token, calls Microsoft Graph, or prints identifiers.
+
+Each lifecycle demo starts with the explicit two-request authentication used
+by Experiment 1: request a device code, complete browser sign-in, and exchange
+the code for one short-lived token. This avoids embedding tenant identifiers in
+tracked files and avoids multiple hidden sign-in dialogs.
 
 ## Shared local configuration
 
