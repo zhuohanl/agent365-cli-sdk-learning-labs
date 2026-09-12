@@ -47,6 +47,20 @@ Neither is a stack transaction. `a365 setup all` is not suitable because its
 normal identity-producing path also creates an Agent Registration with a
 CLI-selected source ID.
 
+Experiment 3A intentionally tests a different decision: accept that
+CLI-selected source ID unchanged and make the protected durable mapping the
+only authoritative relationship back to the Registry Sync source. This does
+not provide the self-describing DD-002 companion source key, but it may offer a
+smaller supported provisioning path if mapping durability and recovery are
+adequate.
+
+The completed paired observation rejected that alternative for committed-fleet
+use. The CLI-created Registration returned no `originatingStore`, and its
+Package reported `platform` as `Not Available`. Because the implementation
+must identify and filter companion Registrations by third-party platform,
+durable mapping alone is insufficient even though the CLI successfully creates
+the Blueprint, Agent Identity, Registration, permissions, and consent state.
+
 ## Installed Agent 365 CLI
 
 The installed CLI inspected for this research was:

@@ -32,6 +32,12 @@ COMPANION_SOURCE_CREATE_EXPERIMENT = (
     / "03-companion-source-registration-create"
     / "experiment.http"
 )
+CLI_SETUP_ALL_EXPERIMENT = (
+    HTTP_ROOT
+    / "experiments"
+    / "03a-cli-setup-all-companion-create"
+    / "experiment.http"
+)
 PACKAGE_BLUEPRINT_LOOKUP_EXPERIMENT = (
     HTTP_ROOT
     / "experiments"
@@ -132,6 +138,11 @@ class HttpExperimentStructureTests(unittest.TestCase):
                 "exp3DeviceCode",
                 "exp3Token",
                 "exp3CurrentUser",
+            },
+            CLI_SETUP_ALL_EXPERIMENT: {
+                "exp3aDeviceCode",
+                "exp3aToken",
+                "exp3aCurrentUser",
             },
             SOURCE_ID_STABILITY_DEMO: {
                 "stabilityStartDeviceCode",
@@ -319,6 +330,142 @@ class HttpExperimentStructureTests(unittest.TestCase):
         self.assertIn(
             "/packages/{{createdPackageId}}",
             blocks["exp3CompanionPackageAfter"],
+        )
+
+    def test_cli_setup_all_experiment_keeps_cli_source_id_opaque(self):
+        text = CLI_SETUP_ALL_EXPERIMENT.read_text(encoding="utf-8")
+        self.assertIn(
+            "a365 setup all --agent-name $agentName --tenant-id $tenantId "
+            "--authmode obo",
+            text,
+        )
+        self.assertIn("--dry-run", text)
+        self.assertIn("Do not modify the\n# sourceAgentId returned by the CLI.", text)
+        self.assertNotIn(
+            '"sourceAgentId": "agent-governance:companion',
+            text,
+        )
+        self.assertNotRegex(
+            text,
+            r"(?im)^(POST|PATCH|DELETE)\s+\{\{graphBaseUrl\}\}",
+        )
+
+    def test_cli_setup_all_experiment_maps_original_and_cli_companion(self):
+        text = CLI_SETUP_ALL_EXPERIMENT.read_text(encoding="utf-8")
+        blocks = named_blocks(text)
+        expected = [
+            "exp3aListPackagesBefore",
+            "exp3aOriginalPackageBefore",
+            "exp3aGetBlueprint",
+            "exp3aGetBlueprintPrincipal",
+            "exp3aGetAgentIdentity",
+            "exp3aGetRegistration",
+            "exp3aListPackagesAfter",
+            "exp3aOriginalPackageAfter",
+            "exp3aCompanionPackageAfter",
+        ]
+        positions = [list(blocks).index(name) for name in expected]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("A365_EXP3A_CLI_SOURCE_AGENT_ID", text)
+        self.assertIn("A365_EXP3A_REGISTRATION_ID", text)
+        self.assertNotIn("A365_EXP3A_REGISTRATION_ID_PATH", text)
+        self.assertIn(
+            "/agentRegistrations/{{registrationId}}",
+            blocks["exp3aGetRegistration"],
+        )
+        self.assertIn(
+            "Registration ID is a GUID and can be used directly",
+            text,
+        )
+        self.assertIn("mapping.json", text)
+        self.assertIn(
+            "The mapping, not the CLI name or Registration sourceAgentId",
+            text,
+        )
+        self.assertIn("a365 cleanup --agent-name $agentName", text)
+        self.assertIn(
+            "CLI summary labels the Blueprint application object ID",
+            text,
+        )
+        self.assertIn(
+            "Leave A365_EXP3A_BLUEPRINT_APP_ID empty until Step 3A.9",
+            text,
+        )
+        self.assertIn(
+            "different meanings even when their returned values happen to be equal",
+            text,
+        )
+        self.assertIn(
+            "`id`, `appId`, and the CLI summary's\n# Blueprint ID were equal",
+            text,
+        )
+
+    def test_cli_setup_all_experiment_allows_explicit_paired_comparison(self):
+        text = CLI_SETUP_ALL_EXPERIMENT.read_text(encoding="utf-8")
+        self.assertIn(
+            "same\n# approved disposable GCP source",
+            text,
+        )
+        self.assertIn(
+            "temporarily violates the normal\n"
+            "# one-active-companion-per-scoped-source invariant",
+            text,
+        )
+        self.assertIn(
+            "Experiment 03 deterministic companion Package",
+            text,
+        )
+        self.assertIn("comparisonControl", text)
+        self.assertIn("comparison-only", text)
+        self.assertIn(
+            "must not\n# include the Experiment 03 control Blueprint",
+            text,
+        )
+
+    def test_cli_setup_all_experiment_isolates_and_records_full_bundle(self):
+        text = CLI_SETUP_ALL_EXPERIMENT.read_text(encoding="utf-8")
+        self.assertIn(
+            "03a-cli-setup-all-companion-create\\cli-workspace",
+            text,
+        )
+        for effect in (
+            "client secret",
+            "federated identity credential",
+            "managed identity",
+            "Observability",
+            "Power Platform",
+            "appsettings.json",
+        ):
+            self.assertIn(effect, text)
+        self.assertIn("evaluates the complete supported CLI", text)
+        self.assertIn('"unexpectedResourceClasses": []', text)
+        self.assertIn("operator accepts the displayed complete CLI bundle", text)
+
+    def test_cli_experiment_validates_original_package_before_failure_classification(self):
+        text = CLI_SETUP_ALL_EXPERIMENT.read_text(encoding="utf-8")
+        block = named_blocks(text)["exp3aOriginalPackageAfter"]
+        self.assertIn(
+            "A365_EXP3A_PACKAGE_ID` exactly equals the `id` saved",
+            block,
+        )
+        self.assertIn("If either check fails, do not send this request", block)
+        self.assertIn("Title Preview", block)
+        self.assertIn("inconclusive-dependency-failure", block)
+        self.assertIn("invalid\n# observation", block)
+        self.assertIn("Correct the local ID", block)
+        self.assertIn("Do not rerun `a365 setup all`", block)
+
+    def test_cli_experiment_is_listed_between_three_and_four(self):
+        readme = (HTTP_ROOT / "docs" / "http-experiments.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertLess(
+            readme.index("03-companion-source-registration-create"),
+            readme.index("03a-cli-setup-all-companion-create"),
+        )
+        self.assertLess(
+            readme.index("03a-cli-setup-all-companion-create"),
+            readme.index("04-source-id-stability"),
         )
 
     def test_package_blueprint_lookup_chains_response_ids(self):
