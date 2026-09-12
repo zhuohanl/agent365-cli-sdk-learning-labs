@@ -192,10 +192,11 @@ Identity, Registration, Package, source, and initial display-name state for
 the rename and delete demos.
 
 Demo 02 uses `demos/02-rename-companion/prepare_rename.py` after each verified
-GET. The helper preserves every identity relationship, records the Package,
+GET. The helper preserves every identity relationship and records the Package,
 Blueprint, principal, Identity, Registration, and companion Package display
-names independently, and keeps `nameSyncStatus` pending until every name
-covered by the dedicated or shared assignment policy is synchronized.
+names independently. It reports `pending` before any target name is applied,
+`partial` after some names match, and `in-sync` after all names covered by the
+dedicated or shared assignment policy match.
 
 The Package List is usually one response. Only when a response contains
 `@odata.nextLink` has Microsoft Graph split the list into multiple pages; save

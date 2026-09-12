@@ -82,9 +82,10 @@ state used by demos 02 and 03.
 
 Demo 02 treats the provider-owned Package display name as the source for name
 synchronization. Its `prepare_rename.py` helper records each mapped object's
-observed name and keeps the result pending until every in-scope name matches
-policy. Dedicated Blueprint names follow the provider agent; shared Blueprint
-and principal names remain group-level names.
+observed name. It reports `pending` before any target name is applied,
+`partial` after only some names match, and `in-sync` after all in-scope names
+match policy. Dedicated Blueprint names follow the provider agent; shared
+Blueprint and principal names remain group-level names.
 It never obtains a token, calls Microsoft Graph, or prints identifiers.
 
 Each lifecycle demo starts with the explicit two-request authentication used

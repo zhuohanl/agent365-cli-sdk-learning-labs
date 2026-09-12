@@ -11,6 +11,9 @@ DEMO = HTTP_ROOT / "demos" / "01-add-companion" / "demo.http"
 RENAME_DEMO = (
     HTTP_ROOT / "demos" / "02-rename-companion" / "demo.http"
 )
+RENAME_FINDINGS = (
+    HTTP_ROOT / "demos" / "02-rename-companion" / "findings.md"
+)
 DELETE_DEMO = (
     HTTP_ROOT / "demos" / "03-delete-companion" / "demo.http"
 )
@@ -1032,6 +1035,30 @@ class HttpCompanionRenameDemoTests(unittest.TestCase):
             principal_patch,
         )
         self.assertIn("Stop if sign-in asks for new tenant consent", self.text)
+
+    def test_completed_run_findings_are_linked_without_removing_verification(self):
+        findings = RENAME_FINDINGS.read_text(encoding="utf-8")
+        self.assertIn("See findings.md", self.text)
+        self.assertIn(
+            "both displayName and\n# appDisplayName followed",
+            self.text,
+        )
+        self.assertIn(
+            "Continue to verify this on\n# every run",
+            self.text,
+        )
+        self.assertIn(
+            "No separate principal rename was required in this run",
+            findings,
+        )
+        self.assertIn(
+            "Registration display name propagated to the existing companion Package",
+            findings,
+        )
+        self.assertIn(
+            "does not establish a\ncross-provider contract",
+            findings,
+        )
 
     def test_rename_file_contains_no_literal_credentials(self):
         self.assertIn(

@@ -107,6 +107,21 @@ class RenamePreparationTests(unittest.TestCase):
             f"{self.new_name} - managed companion",
         )
 
+    def test_some_verified_names_are_partial(self):
+        objects = list(self.objects(self.old_name))
+        objects[0]["displayName"] = (
+            f"{self.new_name} - dedicated disposable Blueprint"
+        )
+        objects[1]["displayName"] = (
+            f"{self.new_name} - dedicated disposable Blueprint"
+        )
+        mapping = prepare_rename.mapping_values(
+            self.base,
+            self.provider_package(),
+            *objects,
+        )
+        self.assertEqual(mapping["nameSyncStatus"], "partial")
+
     def test_shared_blueprint_names_are_not_renamed_per_agent(self):
         base = dict(self.base, assignmentMode="shared")
         objects = list(self.objects(self.new_name))

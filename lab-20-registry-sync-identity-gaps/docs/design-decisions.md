@@ -203,7 +203,7 @@ Persist at least:
 | `agentIdentityDisplayName` | Last display name observed on the mapped Agent Identity. |
 | `companionRegistrationDisplayName` | Last display name observed on the companion Registration. |
 | `companionPackageDisplayName` | Last display name observed on the materialized companion Package. |
-| `nameSyncStatus` | `in-sync` when every in-scope name follows policy, `pending` when one or more names differ, or `blocked` when a required update cannot safely run. |
+| `nameSyncStatus` | `in-sync` when every in-scope name follows policy, `pending` before any target name is applied, `partial` when only some names match, or `blocked` when a required update cannot safely run. |
 | `sourceLastModifiedDateTime` | Exact provider source modification time observed in Package Details. |
 
 Enforce one active companion per scoped provider source key and one scoped
@@ -799,10 +799,12 @@ Use this reconciliation sequence:
 2. For a dedicated assignment, PATCH the Blueprint `displayName`, then GET and
    verify it.
 3. GET the Blueprint principal after the Blueprint update. If it follows
-   automatically, record the observed name. If it does not, treat its update as
-   a separately authorized operation because the documented general
-   service-principal update requires broader permission. Do not request broad
-   tenant consent as part of routine reconciliation.
+   automatically, record the observed name and do not PATCH it. The completed
+   disposable GCP run returned the new Blueprint name in both the principal's
+   `displayName` and `appDisplayName`. If a later run does not follow, treat
+   the principal update as a separately authorized operation because the
+   documented general service-principal update requires broader permission.
+   Do not request broad tenant consent as part of routine reconciliation.
 4. For a shared assignment, skip both Blueprint and principal rename. Their
    approved group-level names are already in policy.
 5. PATCH the Agent Identity `displayName` through its typed v1.0 endpoint, then
@@ -812,11 +814,12 @@ Use this reconciliation sequence:
    its source, Blueprint, Identity, and owner fields.
 7. GET the companion Package by its mapped Package ID. Observe whether the
    Registration name propagated; do not PATCH the Package or repeat the
-   Registration PATCH while waiting.
+   Registration PATCH while waiting. The completed disposable GCP run updated
+   the existing companion Package without changing its Package ID.
 8. Persist every observed display name after each GET. Set `nameSyncStatus` to
-   `in-sync` only when every object covered by the assignment policy has the
-   expected name. Any remaining mismatch stays `pending`; an update that cannot
-   safely run is `blocked`.
+   `pending` before any target name is applied, `partial` after only some names
+   match, and `in-sync` only when every object covered by the assignment policy
+   has the expected name. An update that cannot safely run is `blocked`.
 
 The rename writes are separate operations, not a transaction. A retry reads
 all mapped objects first and PATCHes only names that still differ. Do not
@@ -831,18 +834,20 @@ The intended name synchronization states are:
 ```text
 in-sync
 -> pending
+-> partial
 -> in-sync
 
 pending
 -> blocked
 -> pending
+-> partial
 -> in-sync
 ```
 
-`pending` covers both a newly detected rename and a partially completed update.
-The per-object display-name fields show exactly which steps remain. `blocked`
-is reserved for a required update that lacks a safe documented operation,
-permission, or approval.
+`pending` means no managed target name has been applied yet. `partial` means at
+least one, but not all, in-scope names match. The per-object display-name fields
+show exactly which steps remain. `blocked` is reserved for a required update
+that lacks a safe documented operation, permission, or approval.
 
 If the provider source ID or native scope changes as well as the display name,
 do not classify the event as a rename. Leave both records
@@ -860,10 +865,11 @@ The current documented write operations are:
 
 The Blueprint branding operation has a narrow documented permission. The
 Blueprint principal update uses the general service-principal API and broader
-permission, so it is not silently added to the default path. The Registration
-operation remains a beta interface that Microsoft does not support for
-production applications. Principal behavior and Registration-to-Package name
-propagation must be established in this bounded experiment before automation.
+permission, so it is not silently added to the default path and was not needed
+in the completed GCP run. The Registration operation remains a beta interface
+that Microsoft does not support for production applications. The observed
+principal and companion Package propagation must be re-verified on every run;
+one GCP result does not establish a cross-provider or timing contract.
 
 ### Rename flow
 
@@ -912,7 +918,7 @@ flowchart TB
         direction TB
         C1{"Dedicated or shared?"}
         C2["Dedicated: rename the Blueprint<br/>and verify the same IDs"]
-        C3["Read the principal to see<br/>whether its name followed"]
+        C3["Read the principal to see<br/>whether its name followed<br/><br/>Observed GCP result: it followed"]
         C4["Shared: keep the approved<br/>group-level names"]
         C5{"Principal still has<br/>the old name?"}
         C6["No: save the observed name"]
@@ -952,7 +958,8 @@ flowchart TB
     E2 --> F1["Read the companion Package;<br/>save the name it actually shows"]
     F1 --> F2{"Do all names covered<br/>by policy now match?"}
     F2 -->|Yes| F3["Set status to in-sync"]
-    F2 -->|No| F4["Keep status pending;<br/>retry only the remaining names"]
+    F2 -->|None match| F4["Keep status pending;<br/>no target name is applied yet"]
+    F2 -->|Some match| F5["Set status partial;<br/>retry only the remaining names"]
 
     style DETECT fill:#fdf3e3,stroke:#b45309,stroke-width:3px,color:#7c2d12
     style GATE fill:#f8fafc,stroke:#475569,stroke-width:3px,color:#1e293b
@@ -983,5 +990,6 @@ is not treated as a cosmetic rename.
 - The add and delete flows above are implementation handling decisions derived
   from the experiment. They are not documented Microsoft lifecycle contracts.
 - Microsoft documents `displayName` updates for both Agent Identity and Agent
-  Registration, but Lab 20 has not yet run an end-to-end provider rename and
-  companion-name reconciliation.
+  Registration. The completed disposable GCP run renamed the dedicated
+  Blueprint, Agent Identity, and Registration in place; the Blueprint principal
+  and companion Package names also followed without changing their IDs.

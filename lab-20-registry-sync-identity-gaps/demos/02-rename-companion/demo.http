@@ -333,6 +333,8 @@ Accept: application/json
 # object. For the current rename, nameSyncStatus should be pending. Re-run the
 # same command after every verified GET below; it advances to in-sync only
 # when every object covered by the assignment policy has its expected name.
+# After at least one, but not all, expected names are verified, it reports
+# partial.
 #
 # The mapping records these independent observations:
 # - packageDisplayName
@@ -409,6 +411,10 @@ Accept: application/json
 #
 # Expected: 200 with the same principal ID and appId. This observation answers
 # whether changing the Blueprint also updates its tenant principal.
+#
+# The completed disposable GCP run observed that both displayName and
+# appDisplayName followed the Blueprint automatically. Still send this GET on
+# every run; the observation is not a cross-provider or timing guarantee.
 
 # @name renameGetBlueprintPrincipalAfterBlueprint
 GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
@@ -423,7 +429,8 @@ Accept: application/json
 # If the principal already has the new Blueprint name, save:
 # ../../evidence/demos/02-rename-companion/blueprint-principal-after-name-sync.json
 #
-# Then run prepare_rename.py and skip Parts 3.4 through 3.7.
+# Then run prepare_rename.py and skip Parts 3.4 through 3.7. This was the path
+# taken by the completed disposable GCP run.
 #
 # If it still has the old name, save instead:
 # ../../evidence/demos/02-rename-companion/blueprint-principal-after-blueprint-rename.json
@@ -621,6 +628,10 @@ OData-Version: 4.0
 #
 # Expected: 200. The companion Package is an observation, not a PATCH target.
 # Do not assume the Registration name propagates immediately.
+#
+# The completed disposable GCP run observed propagation to the existing
+# companion Package without a Package ID change. Continue to verify this on
+# every run rather than treating it as an immediate product guarantee.
 
 # @name renameGetCompanionPackageAfterNameSync
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{companionPackageId}}
@@ -637,6 +648,7 @@ Accept: application/json
 #
 # If the old name remains, wait the agreed propagation period and retry only
 # this GET. Do not PATCH the Package and do not repeat the Registration PATCH.
+#
 # Run prepare_rename.py after every saved observation.
 
 ###############################################################################
@@ -662,8 +674,9 @@ Accept: application/json
 # python demos/02-rename-companion/prepare_rename.py
 #
 # The final nameSyncStatus is in-sync only when every in-scope name matches.
-# Any mismatch remains pending. An unavailable or unauthorized required update
-# is blocked. Never delete and recreate an object to repair a display name.
+# It is pending before any target name is applied, partial after only some
+# names are applied, and blocked when a required update cannot safely run.
+# Never delete and recreate an object to repair a display name.
 
 ###############################################################################
 # Cleanup - restore names only after restoring the provider name
@@ -675,3 +688,5 @@ Accept: application/json
 # 4. Repeat Parts 3 through 6.
 # 5. For shared mode, continue to skip Blueprint and principal rename.
 # 6. Preserve the final rollback evidence and mapping; do not erase history.
+#
+# See findings.md for the sanitized result of the completed GCP run.

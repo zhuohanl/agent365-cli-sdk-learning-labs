@@ -154,9 +154,13 @@ def mapping_values(
         "LastModifiedDateTime"
     )
     result["lastObservedAt"] = datetime.now(timezone.utc).isoformat()
-    result["nameSyncStatus"] = (
-        "in-sync" if all(compared.values()) else "pending"
-    )
+    matched_count = sum(compared.values())
+    if matched_count == len(compared):
+        result["nameSyncStatus"] = "in-sync"
+    elif matched_count:
+        result["nameSyncStatus"] = "partial"
+    else:
+        result["nameSyncStatus"] = "pending"
     return result
 
 
