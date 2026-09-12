@@ -1094,46 +1094,232 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
             "deleteGetIdentityMemberships",
             "deleteListPackagesAfterSourceDeletion",
             "deleteGetOriginalPackageAfter",
+            "deleteListPackagesAtGraceEnd",
+            "deleteGetOriginalPackageAtGraceEnd",
             "deleteCompanionRegistration",
             "deleteGetRegistrationAfter",
             "deleteListPackagesAfterRegistrationDeletion",
             "deleteGetIdentityAfterRegistrationDeletion",
             "deleteAgentIdentity",
             "deleteGetIdentityAfter",
+            "deleteGetBlueprintBeforeCleanup",
+            "deleteGetBlueprintPrincipalBeforeCleanup",
+            "deleteBlueprintStartDeviceCode",
+            "deleteBlueprintToken",
+            "deleteDedicatedBlueprint",
+            "deleteGetBlueprintAfter",
+            "deleteGetBlueprintPrincipalAfter",
+            "deleteListPackagesFinal",
         ]
         self.assertEqual(names, expected)
 
     def test_delete_is_gated_and_registration_is_deleted_first(self):
-        stop_a = self.text.index("# Stop A - confirm source retirement")
+        stop_a1 = self.text.index(
+            "# Stop A - approve source retirement after the grace period"
+        )
+        stop_a2 = self.text.index(
+            "# Stop A2 - separately approve companion Registration retirement"
+        )
+        registration_approval = self.text.index(
+            "event registration-retirement-approved"
+        )
         registration_delete = self.text.index(
             "\nDELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/"
         )
         stop_b = self.text.index("# Stop B - separately approve Agent Identity")
+        identity_approval = self.text.index(
+            "event identity-retirement-approved"
+        )
         identity_delete = self.text.index(
             "\nDELETE {{graphBaseUrl}}/v1.0/servicePrincipals/"
         )
-        self.assertLess(stop_a, registration_delete)
+        self.assertLess(stop_a1, stop_a2)
+        self.assertLess(stop_a2, registration_approval)
+        self.assertLess(registration_approval, registration_delete)
         self.assertLess(registration_delete, stop_b)
+        self.assertLess(stop_b, identity_approval)
+        self.assertLess(identity_approval, identity_delete)
         self.assertLess(stop_b, identity_delete)
 
     def test_graph_requests_use_explicit_delete_token(self):
         for name, block in self.blocks.items():
-            if name in {"deleteStartDeviceCode", "deleteToken"}:
+            if name in {
+                "deleteStartDeviceCode",
+                "deleteToken",
+                "deleteBlueprintStartDeviceCode",
+                "deleteBlueprintToken",
+            }:
                 continue
+            expected_token = (
+                "deleteBlueprintToken"
+                if name
+                in {
+                    "deleteDedicatedBlueprint",
+                    "deleteGetBlueprintAfter",
+                    "deleteGetBlueprintPrincipalAfter",
+                }
+                else "deleteToken"
+            )
             self.assertIn(
                 "Authorization: Bearer "
-                "{{deleteToken.response.body.$.access_token}}",
+                f"{{{{{expected_token}.response.body.$.access_token}}}}",
                 block,
             )
 
-    def test_delete_retains_blueprint_and_mapping_tombstone(self):
+    def test_dedicated_blueprint_cleanup_is_separately_gated(self):
+        stop_c = self.text.index(
+            "# Stop C - separately approve dedicated Blueprint group cleanup"
+        )
+        blueprint_delete = self.text.index(
+            "\nDELETE {{graphBaseUrl}}/v1.0/applications/"
+            "{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint"
+        )
+        self.assertLess(stop_c, blueprint_delete)
+        self.assertIn(
+            "This file never deletes a shared Blueprint",
+            self.text,
+        )
+        self.assertIn("Skip all remaining Part 5 requests for shared mode", self.text)
         self.assertNotRegex(
             self.text,
-            r"(?m)^DELETE .*agentIdentityBlueprint",
+            r"(?m)^DELETE .*servicePrincipals.*blueprintPrincipal",
         )
-        self.assertIn("This file never deletes the mapped Blueprint", self.text)
         self.assertIn("Do not erase the mapping.", self.text)
-        self.assertIn("Agent Identity deletion is soft deletion", self.text)
+        self.assertIn(
+            "Agent Identity and Blueprint deletion are soft deletion",
+            self.text,
+        )
+        self.assertIn(
+            "AgentIdentityBlueprint.DeleteRestore.All",
+            self.text,
+        )
+
+    def test_delete_flow_updates_the_mapping_after_verified_observations(self):
+        self.assertIn(
+            "prototype_retirement_mapping.py",
+            self.text,
+        )
+        for event in (
+            "configure-simulation-grace",
+            "source-missing",
+            "source-relocated",
+            "source-retirement-approved",
+            "registration-retirement-approved",
+            "registration-retired",
+            "companion-package-pending",
+            "companion-package-retired",
+            "identity-retirement-approved",
+            "identity-retired",
+            "blueprint-cleanup-started",
+            "blueprint-retired",
+            "blueprint-principal-retired",
+        ):
+            self.assertIn(f"event {event}", self.text)
+        self.assertIn("lifecycleStatus=partial", self.text)
+        self.assertIn("lifecycleReason=awaiting-grace-period", self.text)
+        self.assertIn("blueprintCleanup.status=partial", self.text)
+        self.assertIn("STOP HERE until gracePeriodEndsAt", self.text)
+
+    def test_package_probe_classifies_observed_title_preview_424(self):
+        self.assertIn("424 Failed Dependency", self.text)
+        self.assertIn("Could not find Title Preview for given title", self.text)
+        self.assertIn("inconclusive-dependency-failure", self.text)
+        self.assertIn(
+            "must not be treated as source-deletion proof",
+            self.text,
+        )
+
+    def test_delete_flow_has_adjacent_private_evidence_instructions(self):
+        expected = [
+            (
+                "deleteListPackagesBefore",
+                "package-list-before-provider-deletion-page-1.json",
+            ),
+            (
+                "deleteGetOriginalPackageBefore",
+                "provider-package-before-deletion.json",
+            ),
+            ("deleteGetBlueprintBefore", "blueprint-before-deletion.json"),
+            (
+                "deleteGetBlueprintPrincipalBefore",
+                "blueprint-principal-before-deletion.json",
+            ),
+            (
+                "deleteGetRegistrationBefore",
+                "companion-registration-before-deletion.json",
+            ),
+            (
+                "deleteGetIdentityBefore",
+                "agent-identity-before-deletion.json",
+            ),
+            (
+                "deleteGetIdentityAppRoleAssignments",
+                "agent-identity-app-role-assignments-before-deletion.json",
+            ),
+            (
+                "deleteGetIdentityMemberships",
+                "agent-identity-memberships-before-deletion.json",
+            ),
+            (
+                "deleteListPackagesAfterSourceDeletion",
+                "package-list-after-provider-deletion-page-1.json",
+            ),
+            (
+                "deleteGetOriginalPackageAfter",
+                "provider-package-after-deletion.json",
+            ),
+            (
+                "deleteListPackagesAtGraceEnd",
+                "package-list-at-grace-end-page-1.json",
+            ),
+            (
+                "deleteGetOriginalPackageAtGraceEnd",
+                "provider-package-at-grace-end.json",
+            ),
+            (
+                "deleteGetRegistrationAfter",
+                "companion-registration-after-deletion.json",
+            ),
+            (
+                "deleteListPackagesAfterRegistrationDeletion",
+                "package-list-after-registration-deletion-page-1.json",
+            ),
+            (
+                "deleteGetIdentityAfterRegistrationDeletion",
+                "agent-identity-after-registration-deletion.json",
+            ),
+            (
+                "deleteGetIdentityAfter",
+                "agent-identity-after-deletion.json",
+            ),
+            (
+                "deleteGetBlueprintBeforeCleanup",
+                "blueprint-before-cleanup.json",
+            ),
+            (
+                "deleteGetBlueprintPrincipalBeforeCleanup",
+                "blueprint-principal-before-cleanup.json",
+            ),
+            ("deleteGetBlueprintAfter", "blueprint-after-cleanup.json"),
+            (
+                "deleteGetBlueprintPrincipalAfter",
+                "blueprint-principal-after-cleanup-01.json",
+            ),
+            ("deleteListPackagesFinal", "package-list-final-page-1.json"),
+        ]
+        request_starts = {
+            name: self.text.index(f"# @name {name}\n")
+            for name in self.blocks
+        }
+        ordered_starts = sorted(request_starts.values())
+        for request_name, evidence_name in expected:
+            with self.subTest(request=request_name):
+                start = request_starts[request_name]
+                later = [value for value in ordered_starts if value > start]
+                end = min(later) if later else len(self.text)
+                request_and_follow_up = self.text[start:end]
+                self.assertIn("# REQUIRED AFTER", request_and_follow_up)
+                self.assertIn(evidence_name, request_and_follow_up)
 
     def test_delete_uses_locked_assignment_and_path_safe_registration_id(self):
         self.assertIn("A365_DEMO_ASSIGNMENT_MODE=", self.text)
@@ -1155,6 +1341,15 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
         )
         self.assertIn(
             "device_code={{deleteStartDeviceCode.response.body.$.device_code}}",
+            self.text,
+        )
+        self.assertIn(
+            "client_id={{clientId}}&scope={{blueprintDeleteScopes}}",
+            self.text,
+        )
+        self.assertIn(
+            "device_code="
+            "{{deleteBlueprintStartDeviceCode.response.body.$.device_code}}",
             self.text,
         )
         self.assertNotRegex(self.text, r"(?i)Authorization:\s+Bearer\s+eyJ")

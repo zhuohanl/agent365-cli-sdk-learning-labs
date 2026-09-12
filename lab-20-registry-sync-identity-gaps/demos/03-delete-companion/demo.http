@@ -2,14 +2,16 @@
 #
 # Question:
 # After an approved disposable GCP source agent is deleted and Registry Sync
-# confirms its absence, can the mapped companion Registration and its dedicated
-# Agent Identity be retired safely and independently?
+# confirms its absence, can the mapped companion Registration, companion
+# Package, dedicated Agent Identity, Blueprint, and Blueprint principal be
+# retired safely while a durable mapping records every partial state?
 #
 # Run one request at a time. Never use "Send All".
 #
-# Parts 1 and 2 are read-only. Parts 3 and 4 are optional, destructive, and
-# require separate approval. Registration deletion is irreversible.
-# Agent Identity deletion is soft deletion; it is not permanent purge.
+# Parts 1 and 2 are read-only. Parts 3 through 5 contain separately gated
+# destructive actions. Registration deletion is irreversible through the
+# tested API. Agent Identity and Blueprint deletion are soft deletion; they
+# are not permanent purge.
 #
 # Put all real values in the shared ignored ../../.env file:
 #
@@ -30,7 +32,12 @@
 # Save private responses only under:
 # ../../evidence/demos/03-delete-companion/
 #
-# This file never deletes the mapped Blueprint or Registry Sync connection.
+# Read proposal.md before running this experiment. After completing it, compare
+# the run with findings.md. The mapping helper is local-only and does not call
+# Microsoft Graph or a provider API.
+#
+# This file never deletes a shared Blueprint or the Registry Sync connection.
+# Dedicated Blueprint cleanup is an optional, separately approved experiment.
 
 @tenantId = {{$dotenv A365_TENANT_ID}}
 @clientId = {{$dotenv A365_CLIENT_ID}}
@@ -47,6 +54,22 @@
 @companionRegistrationIdPath = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID_PATH}}
 @graphBaseUrl = https://graph.microsoft.com
 @deleteScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FApplication.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.DeleteRestore.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@blueprintDeleteScopes = https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.DeleteRestore.All%20offline_access
+
+###############################################################################
+# Mapping initialization - run once before Part 1
+#
+# Run from the Lab 20 directory:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/02-rename-companion/mapping-after-rename.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   initialize
+#
+# The helper replaces the old ambiguous top-level status with lifecycleStatus,
+# adds lifecycleReason, and adds retirement plus blueprintCleanup state. It
+# preserves all IDs, relationships, names, and assignment metadata. Do not
+# initialize the same output twice.
 
 ###############################################################################
 # Authentication 1 - Request a device code
@@ -87,6 +110,11 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.1
+#
+# Do not save this response. The operator ID is used only by the live session.
+
+###############################################################################
 # Part 1.2 - Capture complete Package inventory before provider deletion
 #
 # Expected: 200. Read every returned page and locate the original Package using
@@ -98,6 +126,16 @@ Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.2
+#
+# 1. Save the first page:
+# ../../evidence/demos/03-delete-companion/package-list-before-provider-deletion-page-1.json
+# 2. If @odata.nextLink exists, save every additional page as
+#    package-list-before-provider-deletion-page-2.json, page-3.json, and so on.
+# 3. Confirm there is exactly one provider Package and one companion Package
+#    for the mapping before continuing.
 
 ###############################################################################
 # Part 1.3 - Capture the original Registry Sync Package
@@ -113,6 +151,12 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.3
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/provider-package-before-deletion.json
+
+###############################################################################
 # Part 1.4 - Verify the mapped Blueprint
 #
 # Expected: 200. Confirm its object ID and appId match the locked assignment.
@@ -123,6 +167,12 @@ Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.4
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/blueprint-before-deletion.json
 
 ###############################################################################
 # Part 1.5 - Verify the enabled Blueprint principal
@@ -136,6 +186,12 @@ Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.5
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/blueprint-principal-before-deletion.json
 
 ###############################################################################
 # Part 1.6 - Capture the mapped companion Registration
@@ -156,6 +212,12 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.6
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/companion-registration-before-deletion.json
+
+###############################################################################
 # Part 1.7 - Capture the mapped Agent Identity
 #
 # Expected: 200. Confirm the ID and Blueprint appId match the mapping.
@@ -168,7 +230,47 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.7
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/agent-identity-before-deletion.json
+
+###############################################################################
 # Part 1.8 - OPTIONAL inspect direct app-role assignments
+#
+# An Agent Identity is a service principal. It can be granted application
+# permissions to Microsoft Graph, another Microsoft API, or a customer API
+# independently of its companion Registration. Deleting the Registration does
+# not prove that these grants are unused. Deleting the Agent Identity removes
+# the service principal that holds them and can break a separate runtime,
+# scheduled job, or integration that still authenticates as this identity.
+#
+# This request lists app-role assignments granted directly to the mapped Agent
+# Identity. The response normally identifies the target resource service
+# principal and app role by IDs. Resolve or classify those IDs only through an
+# already approved directory read; do not copy real IDs into tracked files.
+#
+# Example A - empty value array:
+# No direct app-role assignment was observed. This reduces one deletion risk,
+# but it does not prove that the Identity is unused. Runtime bindings, OAuth
+# grants, directory roles, group-derived access, policies, owners, and external
+# provider credentials are outside this one response.
+#
+# Example B - expected disposable permission:
+# The Lab may have granted this Identity an application role on Microsoft Graph
+# or a test API. Confirm that the grant belongs only to this disposable demo,
+# that no remaining runtime uses it, and that retirement approval covers losing
+# that access. Do not remove the assignment merely to make this check empty.
+#
+# Example C - unexpected enterprise permission:
+# The response might resolve to a role such as a mail, files, SharePoint, or
+# customer-API application permission that was not part of the Lab. Treat that
+# as evidence of another consumer or an unresolved dependency. Stop deletion
+# and ask the permission owner to identify its purpose.
+#
+# A non-empty result does not automatically block retirement forever, and an
+# empty result does not automatically approve retirement. The result supplies
+# evidence for the dependency review at Stop A and Stop B.
 #
 # This documented service-principal relationship requires the separately
 # consented Application.Read.All permission. Do not request broader permission
@@ -186,9 +288,62 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 1.8 WHEN THE READ IS APPROVED
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/agent-identity-app-role-assignments-before-deletion.json
+#
+# If the read is unavailable, do not fabricate an empty result. Record the
+# boundary outside response evidence and stop before destructive steps.
+
+###############################################################################
 # Part 1.9 - Inspect direct directory memberships
 #
-# Expected: 200. Record only safe counts/classifications in tracked evidence.
+# An Agent Identity can be placed in a directory group independently of its
+# companion Registration and direct app-role assignments. A group can be used
+# to grant access, select identities for governance, organize an approved agent
+# population, or drive customer automation. Deleting the Agent Identity removes
+# the directory object that participates in those relationships and can change
+# behavior outside this Lab.
+#
+# This request reads the mapped Agent Identity's direct memberOf relationships.
+# It answers "which directory containers directly include this Identity?" It
+# does not enumerate every transitive group, every policy that references a
+# group, or every external system that copied the membership.
+#
+# Example A - empty value array:
+# No direct directory membership was observed. This removes one dependency
+# concern, but it does not prove that the Identity is unused. Part 1.8,
+# runtime-binding review, policy review, and external-system checks remain
+# separate.
+#
+# Example B - expected disposable Lab group:
+# The Identity might belong to a temporary group used only to identify Demo 1
+# objects or grant disposable test access. Confirm the group is truly
+# experiment-only and that no remaining object or automation expects this
+# member before approving deletion.
+#
+# Example C - unexpected business or production group:
+# The Identity might appear in a group such as "Approved Production Agents",
+# "Finance Automation", or a group that has access to a customer API. That can
+# mean another workflow deliberately adopted this Identity after creation.
+# Stop deletion and ask the group owner what access, policy, reporting, or
+# automation depends on the membership.
+#
+# Example D - unfamiliar directory object type:
+# memberOf can return directory objects that are not understood from their
+# display name alone. Do not guess from the name or remove the relationship.
+# Classify it as an unresolved dependency until an approved directory owner
+# identifies the object and its purpose.
+#
+# A non-empty result requires dependency review; it is not permission to remove
+# the Identity from a group. An empty result is not retirement approval. The
+# result contributes evidence to Stop A and Stop B together with the direct
+# app-role assignment check.
+#
+# Expected: 200. Preserve the private response locally. Put only safe counts
+# and classifications such as empty, expected-lab-only, or unresolved in
+# tracked findings.
 
 # @name deleteGetIdentityMemberships
 GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity/memberOf?$select=id,displayName
@@ -196,6 +351,12 @@ Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 1.9
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/agent-identity-memberships-before-deletion.json
 
 ###############################################################################
 # Manual provider checkpoint - no request
@@ -229,13 +390,32 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 2.1
+#
+# Save the first page immediately:
+# ../../evidence/demos/03-delete-companion/package-list-after-provider-deletion-page-1.json
+#
+# If @odata.nextLink exists, save every additional page as
+# package-list-after-provider-deletion-page-2.json, page-3.json, and so on.
+# Do not send Part 2.2 until every page is saved.
+
+###############################################################################
 # Part 2.2 - Probe the previous Package ID
 #
-# Expected only after confirmed source deletion: 404.
+# Possible results:
 #
-# A 200 means the Package still exists and cleanup must stop. A 404 by itself
-# is not sufficient; Part 2.1, sync health, grace period, and provider evidence
-# must also agree.
+# - 200: the Package Details endpoint still resolves the old Package. Stop.
+# - 404: the endpoint reports that the old Package is absent.
+# - 424 Failed Dependency with UnknownError and the nested message
+#   "Could not find Title Preview for given title.": classify the Package
+#   Details probe as inconclusive-dependency-failure.
+# - any other error: save it and stop for classification.
+#
+# The observed Title Preview 424 means the Package Details backend could not
+# materialize a dependency for this ID. It is compatible with a disappearing
+# Package, but it must not be treated as source-deletion proof or rewritten as
+# a 404. Part 2.1 complete inventory, healthy sync, the grace period, and
+# provider evidence remain the deletion evidence.
 
 # @name deleteGetOriginalPackageAfter
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
@@ -245,26 +425,245 @@ Accept: application/json
 ###
 
 ###############################################################################
-# Stop A - confirm source retirement before deleting companion objects
+# REQUIRED AFTER PART 2.2
+#
+# Save the previous Package ID response immediately, including a JSON error
+# response:
+# ../../evidence/demos/03-delete-companion/provider-package-after-deletion.json
+#
+# Then compare this response with every saved Part 2.1 page and search for the
+# exact scoped provider source key.
+#
+# If the same source appears under a replacement Package ID, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event source-relocated --package-id "<replacement-package-id>"
+#
+# Confirm lifecycleStatus returned to active, then STOP. Do not delete any
+# companion object.
+#
+# If the source key and previous Package ID are absent from every complete
+# Part 2.1 inventory page, run the following for either:
+#
+# - a 404 Package Details response; or
+# - the verified-target Title Preview 424 described above.
+#
+# The source-missing event records the complete-inventory observation. It does
+# not convert the Package Details response into successful absence proof.
+#
+# Run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event source-missing `
+#   --grace-period-ends-at "<approved-ISO-8601-deadline>"
+#
+# Replace the angle-bracket placeholder with a real timestamp that includes a
+# timezone. Do not run the command with the placeholder text. If no waiting
+# policy is approved yet, omit --grace-period-ends-at and remain pending.
+#
+# This records:
+# - lifecycleStatus=pending;
+# - lifecycleReason=awaiting-grace-period;
+# - providerSource.reason=provider-presence-unconfirmed; and
+# - registrySyncPackage.reason=not-observed-in-complete-inventory.
+#
+# The grace-period reason belongs to the overall workflow because the system
+# started the timer. It does not claim that the provider confirmed deletion.
+# Re-run source-missing after later observations if the source remains absent;
+# this advances lastCheckedAt without changing statusChangedAt or clearing an
+# existing grace-period deadline.
+
+###############################################################################
+# CURRENT CHECKPOINT - STOP HERE until gracePeriodEndsAt
+#
+# Immediately after source-missing, confirm only:
+# - lifecycleStatus is pending;
+# - lifecycleReason is awaiting-grace-period;
+# - providerSource is pending with reason provider-presence-unconfirmed;
+# - registrySyncPackage is pending with reason
+#   not-observed-in-complete-inventory;
+# - companionRegistration, companionPackage, and agentIdentity remain active;
+# - sourceRetirementApprovedAt is null; and
+# - no DELETE request is authorized.
+#
+# Do not expect providerSource or registrySyncPackage to be retired yet.
+
+###############################################################################
+# Simulation-only grace policy - optional local mapping change
+#
+# The production candidate remains 14 days. To complete this disposable
+# lifecycle experiment today without pretending that 14 days passed, an
+# explicitly approved simulation may use a real 15-minute interval that has
+# already elapsed since missingSince.
+#
+# Do not edit mapping.json manually and do not provide a future --at value.
+# Run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event configure-simulation-grace `
+#   --simulation-grace-minutes 15 `
+#   --production-candidate-grace-period P14D `
+#   --reason validate-disposable-delete-lifecycle
+#
+# Confirm:
+# - retirementPolicy.mode is experiment-simulation;
+# - retirementPolicy.gracePeriod is PT15M;
+# - retirementPolicy.productionCandidateGracePeriod is P14D; and
+# - gracePeriodEndsAt equals missingSince plus 15 real minutes.
+#
+# This simulation validates lifecycle mechanics only. It does not validate
+# that 15 minutes or 14 days is the correct production waiting policy.
+
+###############################################################################
+# Part 2.3 - Re-read complete inventory at the grace-period boundary
+#
+# Run this after the real grace deadline or after the approved simulation
+# policy above. Expected: 200. Read and save every page before continuing.
+
+# @name deleteListPackagesAtGraceEnd
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 2.3
+#
+# Save the first page:
+# ../../evidence/demos/03-delete-companion/package-list-at-grace-end-page-1.json
+#
+# Save every @odata.nextLink page as page-2.json, page-3.json, and so on.
+# Search all pages for the exact scoped provider source key and old Package ID.
+
+###############################################################################
+# Part 2.4 - Re-probe the previous Package ID at the grace boundary
+#
+# Expected: 404 or the already classified Title Preview 424. A 200 means the
+# Package resolves again and retirement must stop.
+
+# @name deleteGetOriginalPackageAtGraceEnd
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 2.4
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/provider-package-at-grace-end.json
+#
+# If the stable source appears under any Package ID, run source-relocated and
+# STOP. Do not retire the source.
+#
+# If complete healthy inventory still contains no matching source or old
+# Package ID, and Part 2.4 returned either 404 or the classified Title Preview
+# 424, run source-missing again without changing the deadline:
+#
+# Run from the Lab 20 directory. If the command reports Preparation failed,
+# do not continue; correct the working directory or path and rerun it.
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event source-missing
+#
+# Require the command to print lifecycleStatus=pending, then reopen mapping.json
+# and confirm lifecycleReason=awaiting-source-retirement-approval. Also confirm
+# providerSource.lastCheckedAt is later than retirementPolicy.configuredAt.
+# This second source-missing event records a real grace-end observation; it
+# does not copy or reuse the earlier Package evidence.
+
+###############################################################################
+# Stop A - approve source retirement after the grace period
 #
 # Continue only when all conditions are true:
-# - the provider confirms the exact disposable source agent was deleted;
-# - successful Registry Sync plus the grace period confirms the scoped source
-#   key is absent from every Package List page;
+# - the current time is at or after gracePeriodEndsAt;
+# - a new successful, healthy Registry Sync observation still finds the scoped
+#   source key absent from every Package List page;
 # - no replacement Package exists for the same source key;
 # - the mapping still identifies exactly one companion Registration and Agent
 #   Identity for that source;
 # - no other active mapping references either object;
 # - runtime use, grants, policies, memberships, owners, and other dependencies
 #   have been reviewed; and
-# - separate Registration retirement approval has been recorded.
+# - the approved sustained-absence policy authorizes source retirement.
 #
-# Otherwise mark reconciliation-required and stop.
+# Provider confirmation is useful when an approved provider integration or
+# human checkpoint supplies it, but automatic Registry Sync reconciliation
+# cannot claim provider deletion. Without provider confirmation, retirement is
+# based on the approved sustained-absence policy.
+#
+# Otherwise leave lifecycleStatus pending, or run block-object with an exact
+# reason when a required safety check cannot be completed:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event block-object --object companionRegistration `
+#   --reason "<safe-blocking-reason>"
+#
+# When all Stop A conditions are satisfied, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event source-retirement-approved
+#
+# The helper rejects this event before gracePeriodEndsAt. Its default provider
+# reason is retired-by-sustained-registry-absence-policy. If separate provider
+# evidence exists, supply a more specific approved --reason without changing
+# the Registry Sync evidence classification.
+#
+# Confirm:
+# - lifecycleStatus is pending;
+# - lifecycleReason is companion-retirement-pending;
+# - providerSource and registrySyncPackage are retired; and
+# - companionRegistration is pending with reason approval-required.
+#
+# This event approves source retirement only. It does not approve or perform
+# companion Registration deletion.
+
+###############################################################################
+# Stop A2 - separately approve companion Registration retirement
+#
+# Do not continue merely because companionRegistration is approval-required.
+# That reason means the workflow is waiting for a separate decision.
+#
+# Continue only when:
+# - Stop A retired providerSource and registrySyncPackage;
+# - companionRegistration is pending with reason approval-required;
+# - the Registration and Agent Identity IDs still match the dependency review;
+# - no active mapping, runtime, grant, policy, membership, owner workflow, or
+#   other reviewed dependency requires the Registration; and
+# - explicit approval to delete this disposable companion Registration has
+#   been obtained.
+#
+# After approval, record it before sending DELETE:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event registration-retirement-approved
+#
+# Confirm:
+# - companionRegistrationRetirementApprovedAt is populated;
+# - companionRegistration remains pending; and
+# - companionRegistration.reason is retirement-approved.
 
 ###############################################################################
 # Part 3.1 - OPTIONAL irreversible companion Registration deletion
 #
-# Do not send during evidence gathering.
+# Do not send during evidence gathering. Run only after Stop A2 records the
+# separate Registration retirement approval.
 # Expected: 204.
 
 # @name deleteCompanionRegistration
@@ -274,6 +673,12 @@ Accept: application/json
 OData-Version: 4.0
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 3.1
+#
+# A successful DELETE returns 204 with no body. Do not fabricate JSON evidence.
+# Continue immediately to the verified GET.
 
 ###############################################################################
 # Part 3.2 - Confirm the Registration is gone
@@ -290,6 +695,20 @@ OData-Version: 4.0
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 3.2
+#
+# 1. Save the JSON 404 response:
+# ../../evidence/demos/03-delete-companion/companion-registration-after-deletion.json
+# 2. Only after the expected 404, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event registration-retired
+#
+# Confirm lifecycleStatus=partial and companionPackage.status=pending.
+
+###############################################################################
 # Part 3.3 - Observe Package inventory after Registration deletion
 #
 # Expected: 200. Do not assume the companion Package disappears immediately
@@ -301,6 +720,34 @@ Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 3.3
+#
+# 1. Save every returned page:
+# ../../evidence/demos/03-delete-companion/package-list-after-registration-deletion-page-1.json
+# ../../evidence/demos/03-delete-companion/package-list-after-registration-deletion-page-2.json
+# 2. Search every page for A365_DEMO_COMPANION_SOURCE_AGENT_ID and the mapped
+#    companion Package ID. Do not infer disappearance from the first page.
+#
+# If the companion Package still exists, or inventory propagation is unclear:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event companion-package-pending
+#
+# Wait for the configured propagation interval and repeat Part 3.3.
+#
+# Only when complete healthy inventory proves that the companion Package is
+# absent, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event companion-package-retired
+#
+# Confirm agentIdentity.status=pending with reason approval-required.
 
 ###############################################################################
 # Part 3.4 - Confirm the Agent Identity still exists independently
@@ -316,22 +763,48 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 3.4
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/agent-identity-after-registration-deletion.json
+#
+# Expected for this checkpoint: 200. A different result must be investigated
+# before any further deletion.
+
+###############################################################################
 # Stop B - separately approve Agent Identity retirement
 #
 # Continue only when:
 # - Part 3.1 and Part 3.2 proved Registration deletion;
-# - Package observations have been recorded;
+# - complete healthy inventory proves the companion Package is absent;
+# - the mapping records companionPackage.status=retired;
 # - the Agent Identity was created exclusively for this source;
 # - no runtime binding, app-role assignment, membership, grant, policy, owner
 #   workflow, or other consumer still requires it; and
-# - Agent Identity retirement approval has been recorded.
+# - explicit approval to retire this disposable Agent Identity has been
+#   obtained.
 #
-# Keep the mapped Blueprint. Even a dedicated Blueprint has a separate
-# retirement lifecycle and is not deleted by this per-agent cleanup step.
+# The companion Package requirement is intentionally conservative for this
+# prototype. Record the evidence before deciding whether the final design can
+# safely weaken it.
+#
+# After approval, record it before sending DELETE:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event identity-retirement-approved
+#
+# Confirm:
+# - agentIdentityRetirementApprovedAt is populated;
+# - agentIdentity remains pending; and
+# - agentIdentity.reason is retirement-approved.
 
 ###############################################################################
 # Part 4.1 - OPTIONAL Agent Identity soft deletion
 #
+# Run only after Stop B records the separate Agent Identity retirement
+# approval.
 # Expected: 204. This does not permanently purge the directory object.
 
 # @name deleteAgentIdentity
@@ -340,6 +813,12 @@ Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
 ###
+
+###############################################################################
+# REQUIRED AFTER PART 4.1
+#
+# A successful DELETE returns 204 with no body. Do not fabricate JSON evidence.
+# Continue immediately to the verified GET.
 
 ###############################################################################
 # Part 4.2 - Confirm the active Agent Identity is gone
@@ -358,6 +837,231 @@ Accept: application/json
 ###
 
 ###############################################################################
+# REQUIRED AFTER PART 4.2
+#
+# 1. Save the JSON 404 response:
+# ../../evidence/demos/03-delete-companion/agent-identity-after-deletion.json
+# 2. Only after the expected active-resource 404, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event identity-retired
+#
+# Confirm lifecycleStatus=retired. This means source-owned cleanup is complete;
+# it does not mean that soft-deleted directory objects were permanently purged.
+
+###############################################################################
+# Part 5.1 - Re-read the dedicated Blueprint before group cleanup
+#
+# Expected: 200. Use the existing read token. Confirm the Blueprint object ID,
+# appId, assignmentMode=dedicated, and empty mapped group before continuing.
+#
+# Skip all remaining Part 5 requests for shared mode.
+
+# @name deleteGetBlueprintBeforeCleanup
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.1
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/blueprint-before-cleanup.json
+
+###############################################################################
+# Part 5.2 - Re-read the Blueprint principal before group cleanup
+#
+# Expected: 200. Confirm the principal ID and appId still match the mapping.
+
+# @name deleteGetBlueprintPrincipalBeforeCleanup
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.2
+#
+# Save:
+# ../../evidence/demos/03-delete-companion/blueprint-principal-before-cleanup.json
+
+###############################################################################
+# Stop C - separately approve dedicated Blueprint group cleanup
+#
+# Continue only when:
+# - assignmentMode is dedicated;
+# - lifecycleStatus is retired;
+# - no active or pending mapping remains in blueprintGroup;
+# - the mapped Agent Identity is already retired;
+# - the Blueprint and principal IDs match the locked mapping;
+# - the operator understands that Blueprint deletion is soft deletion and
+#   triggers asynchronous cascade cleanup of associated child identities; and
+# - dedicated Blueprint deletion is explicitly approved.
+#
+# Do not continue for shared mode. Keep blueprintCleanup.status=active with
+# reason shared-group-not-empty.
+#
+# After approval, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event blueprint-cleanup-started
+#
+# Confirm blueprintCleanup.status=pending and both Blueprint objects are
+# pending before requesting the separately scoped deletion token.
+
+###############################################################################
+# Authentication 3 - Request a Blueprint cleanup device code
+#
+# Do not reuse a token that lacks AgentIdentityBlueprint.DeleteRestore.All.
+# Never save this response. Stop rather than approve unexpected permissions.
+
+# @name deleteBlueprintStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{blueprintDeleteScopes}}
+
+###
+
+###############################################################################
+# Authentication 4 - Exchange the Blueprint cleanup device code
+#
+# Never save this response.
+
+# @name deleteBlueprintToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{deleteBlueprintStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Part 5.3 - OPTIONAL dedicated Blueprint soft deletion
+#
+# Expected: 204. The typed endpoint uses the separately approved
+# AgentIdentityBlueprint.DeleteRestore.All permission.
+#
+# Current first-party documentation says deleting the Blueprint application
+# also deletes its principal and asynchronously cleans up child identities.
+# This experiment verifies the behavior for this disposable dedicated group.
+
+# @name deleteDedicatedBlueprint
+DELETE {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{deleteBlueprintToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.3
+#
+# A successful DELETE returns 204 with no body. Do not fabricate JSON evidence.
+# Verify the Blueprint and principal independently.
+
+###############################################################################
+# Part 5.4 - Confirm the active Blueprint is gone
+#
+# Expected: 404 from the active typed resource.
+
+# @name deleteGetBlueprintAfter
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{deleteBlueprintToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.4
+#
+# 1. Save the JSON 404 response:
+# ../../evidence/demos/03-delete-companion/blueprint-after-cleanup.json
+# 2. Only after the expected 404, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event blueprint-retired
+#
+# Confirm blueprintCleanup.status=partial until the principal is also absent.
+
+###############################################################################
+# Part 5.5 - Observe Blueprint principal cascade deletion
+#
+# Expected eventually: 404.
+#
+# A 200 means cascade cleanup has not completed. Save the observation, leave
+# blueprintPrincipal.status=pending, wait, and repeat this GET. Do not send a
+# separate principal DELETE merely to make the experiment complete.
+
+# @name deleteGetBlueprintPrincipalAfter
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{deleteBlueprintToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.5
+#
+# Save each observation without overwriting earlier evidence:
+# ../../evidence/demos/03-delete-companion/blueprint-principal-after-cleanup-01.json
+# ../../evidence/demos/03-delete-companion/blueprint-principal-after-cleanup-02.json
+#
+# Only after the expected 404, run:
+#
+# python demos/03-delete-companion/prototype_retirement_mapping.py `
+#   --mapping evidence/demos/03-delete-companion/mapping.json `
+#   --output evidence/demos/03-delete-companion/mapping.json `
+#   event blueprint-principal-retired
+#
+# Confirm blueprintCleanup.status=retired. If a safe required observation is
+# unavailable, use block-object with --object blueprintPrincipal and record
+# the exact reason instead of assuming cascade completion.
+
+###############################################################################
+# Part 6 - Final Package inventory observation
+#
+# Expected: 200. Read every page and confirm that neither the provider source
+# key nor companion source ID is present. This does not prove permanent purge
+# of any soft-deleted Entra object.
+
+# @name deleteListPackagesFinal
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{deleteToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 6
+#
+# Save every returned page:
+# ../../evidence/demos/03-delete-companion/package-list-final-page-1.json
+# ../../evidence/demos/03-delete-companion/package-list-final-page-2.json
+#
+# Review evidence/demos/03-delete-companion/mapping.json. For the completed
+# dedicated path, expected aggregate values are:
+#
+# lifecycleStatus: retired
+# lifecycleReason: source-retired
+# blueprintCleanup.status: retired
+#
+# For shared mode, expected values are:
+#
+# lifecycleStatus: retired
+# lifecycleReason: source-retired
+# blueprintCleanup.status: active
+# blueprintCleanup.reason: shared-group-not-empty
+
+###############################################################################
 # Final tombstone checkpoint - no request
 #
 # Preserve:
@@ -365,10 +1069,11 @@ Accept: application/json
 # - former Package, companion Registration, Agent Identity, and Blueprint IDs
 # - provider deletion and Registry Sync confirmation timestamps
 # - Registration DELETE/GET outcomes
-# - Agent Identity DELETE/GET outcomes
+# - Agent Identity and Blueprint DELETE/GET outcomes
 # - dependency-review and approval references
-# - final status and any partial or inconclusive result
+# - lifecycleStatus and each per-object status, reason, and timestamp
+# - blueprintCleanup status and any partial or blocked result
 #
 # Do not erase the mapping. It prevents stale inventory from silently creating
-# a replacement companion. Do not delete the mapped Blueprint,
-# Registry Sync connection, provider credentials, or unrelated local evidence.
+# a replacement companion. Do not delete the Registry Sync connection,
+# provider credentials, or unrelated local evidence.

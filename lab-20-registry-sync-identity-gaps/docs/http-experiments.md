@@ -58,6 +58,10 @@ Delete is last because it removes the Registration required by the rename
 demo. Each demo remains gated and can instead use a different explicitly
 approved disposable agent selected through `.env`.
 
+After each completed lifecycle run, compare the private evidence with the
+sanitized `findings.md` in that demo directory. Demo findings record observed
+behavior without making the ignored evidence public.
+
 Before demo 01, provide only the exact GCP Package display name:
 
 ```dotenv
