@@ -4,10 +4,12 @@
 
 The disposable Google Vertex AI provider agent was removed and a complete
 Registry Sync inventory no longer contained either its previous Package ID or
-its scoped provider source key. After the simulation-only grace period and
-separate approvals, the companion Registration, companion Package, dedicated
-Agent Identity, dedicated Blueprint, and Blueprint principal were retired in
-dependency order.
+its scoped provider source key. After the simulation-only grace period, the
+experiment used separate safety approvals while observing the companion
+Registration, companion Package, dedicated Agent Identity, dedicated
+Blueprint, and Blueprint principal retire in dependency order. The scalable
+handling rule now consolidates those manual gates into one retirement-plan
+approval.
 
 The final durable mapping reached:
 
@@ -57,6 +59,12 @@ metadata fields, but no credential material was present.
    principal.
 8. Preserve all former IDs and timestamps in a tombstone. Do not automatically
    reactivate a retired mapping if the provider source later reappears.
+
+The experiment separated destructive checkpoints to make each observation
+visible to a human. That is not the intended production operator experience.
+After one post-grace retirement-plan approval, automation should execute and
+verify Registration deletion, companion Package disappearance, Agent Identity
+deletion, and empty-Blueprint cleanup without requesting further approvals.
 
 ## Boundary
 

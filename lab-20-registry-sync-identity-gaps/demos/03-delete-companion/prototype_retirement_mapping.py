@@ -6,7 +6,9 @@ import argparse
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 
@@ -24,6 +26,18 @@ MANAGED_SOURCE_OBJECTS = (
 )
 BLUEPRINT_OBJECTS = ("blueprint", "blueprintPrincipal")
 OBJECT_STATUSES = {"active", "pending", "retired", "blocked"}
+OBSERVATION_TIMESTAMP_FIELDS = {
+    "lastCheckedAt",
+    "statusChangedAt",
+    "retiredAt",
+    "missingSince",
+    "lastHealthyAbsenceObservedAt",
+    "retirementApprovedAt",
+    "observedAt",
+    "resolvedAt",
+    "eligibilityInvalidatedAt",
+    "lastSourceObservedAt",
+}
 
 
 def timestamp(value: str | None = None) -> str:
@@ -61,6 +75,31 @@ def object_state(status: str, reason: str, at: str) -> dict[str, Any]:
     }
 
 
+def latest_observation_timestamp(value: Any) -> str | None:
+    timestamps: list[tuple[datetime, str]] = []
+
+    def collect(current: Any) -> None:
+        if isinstance(current, dict):
+            for key, nested in current.items():
+                if (
+                    key in OBSERVATION_TIMESTAMP_FIELDS
+                    and isinstance(nested, str)
+                ):
+                    timestamps.append(
+                        (parsed_timestamp(nested, key), nested)
+                    )
+                else:
+                    collect(nested)
+        elif isinstance(current, list):
+            for nested in current:
+                collect(nested)
+
+    collect(value)
+    if not timestamps:
+        return None
+    return max(timestamps, key=lambda item: item[0])[1]
+
+
 def set_object_state(
     state: dict[str, Any],
     status: str,
@@ -89,9 +128,10 @@ def initialize(mapping: dict[str, Any], at: str) -> dict[str, Any]:
     result["lifecycleReason"] = "source-active"
     result["retirement"] = {
         "missingSince": None,
-        "sourceRetirementApprovedAt": None,
-        "companionRegistrationRetirementApprovedAt": None,
-        "agentIdentityRetirementApprovedAt": None,
+        "lastHealthyAbsenceObservedAt": None,
+        "lastSourceObservation": "present",
+        "lastSourceObservedAt": at,
+        "retirementApprovedAt": None,
         "gracePeriodEndsAt": None,
         "providerSource": object_state(
             "active", "observed-via-registry-sync", at
@@ -105,17 +145,32 @@ def initialize(mapping: dict[str, Any], at: str) -> dict[str, Any]:
         "companionPackage": object_state("active", "verified-present", at),
         "agentIdentity": object_state("active", "verified-present", at),
     }
-    cleanup_reason = (
-        "source-active"
-        if result.get("assignmentMode") == "dedicated"
-        else "shared-group-not-empty"
-    )
     result["blueprintCleanup"] = {
         "status": "active",
-        "reason": cleanup_reason,
+        "reason": "source-active",
+        "remainingAgentIdentities": None,
+        "pendingIdentityReservations": None,
+        "lastCheckedAt": None,
+        "membershipEvidence": None,
+        "eligibilityInvalidatedAt": None,
+        "blueprintDelete": {
+            "status": "not-started",
+            "startedAt": None,
+            "verifiedAt": None,
+        },
         "blueprint": object_state("active", "verified-present", at),
         "blueprintPrincipal": object_state("active", "verified-present", at),
     }
+    result["reconciliationHold"] = {
+        "status": "clear",
+        "reason": None,
+        "observedAt": None,
+        "packageId": None,
+        "resolvedAt": None,
+        "previousSourceObservation": None,
+        "previousSourceObservedAt": None,
+    }
+    result["safetyWatermarkAt"] = at
     return result
 
 
@@ -157,13 +212,42 @@ def require_blueprint_state(
     return state
 
 
+def invalidate_blueprint_eligibility(
+    mapping: dict[str, Any],
+    at: str,
+) -> None:
+    cleanup = mapping["blueprintCleanup"]
+    delete_pending = cleanup["blueprintDelete"]["status"] == "pending"
+    cleanup["remainingAgentIdentities"] = None
+    cleanup["pendingIdentityReservations"] = None
+    cleanup["membershipEvidence"] = None
+    cleanup["lastCheckedAt"] = at
+    cleanup["eligibilityInvalidatedAt"] = at
+    for name in BLUEPRINT_OBJECTS:
+        state = cleanup[name]
+        if state.get("status") == "pending" and not delete_pending:
+            set_object_state(
+                state,
+                "active",
+                "awaiting-membership-recheck",
+                at,
+            )
+
+
 def recalculate(mapping: dict[str, Any]) -> None:
     retirement = mapping["retirement"]
     source_states = [retirement[name]["status"] for name in SOURCE_OBJECTS]
     managed_states = [
         retirement[name]["status"] for name in MANAGED_SOURCE_OBJECTS
     ]
-    if "blocked" in source_states:
+    hold = mapping.get("reconciliationHold", {})
+    if hold.get("status") == "blocked":
+        mapping["lifecycleStatus"] = "blocked"
+        mapping["lifecycleReason"] = hold.get(
+            "reason",
+            "source-reappearance-review-required",
+        )
+    elif "blocked" in source_states:
         mapping["lifecycleStatus"] = "blocked"
         mapping["lifecycleReason"] = "required-step-blocked"
     elif all(status == "retired" for status in source_states):
@@ -193,12 +277,15 @@ def recalculate(mapping: dict[str, Any]) -> None:
         cleanup["status"] = "active"
 
     if cleanup["status"] == "active":
-        if mapping.get("assignmentMode") == "shared":
-            cleanup["reason"] = "shared-group-not-empty"
+        if (
+            (cleanup.get("remainingAgentIdentities") or 0) > 0
+            or (cleanup.get("pendingIdentityReservations") or 0) > 0
+        ):
+            cleanup["reason"] = "group-not-empty"
         elif mapping["lifecycleStatus"] == "active":
             cleanup["reason"] = "source-active"
         elif mapping["lifecycleStatus"] == "retired":
-            cleanup["reason"] = "source-retired-awaiting-cleanup"
+            cleanup["reason"] = "awaiting-group-membership-check"
         else:
             cleanup["reason"] = "source-retirement-incomplete"
 
@@ -214,29 +301,115 @@ def apply_event(
     object_name: str | None = None,
     simulation_grace_minutes: int | None = None,
     production_candidate_grace_period: str | None = None,
+    remaining_agent_identities: int | None = None,
+    pending_identity_reservations: int | None = None,
+    blueprint_id: str | None = None,
+    enumeration_complete: bool = False,
+    onboarding_exclusion_held: bool = False,
+    max_observation_age_minutes: int | None = None,
 ) -> dict[str, Any]:
     result = deepcopy(mapping)
     retirement = result.get("retirement")
     if not isinstance(retirement, dict):
         raise ValueError("Initialize the mapping before applying events")
     event_time = parsed_timestamp(at, "event timestamp")
-    if "sourceDeletionConfirmedAt" in retirement:
-        retirement.setdefault(
+    retirement.setdefault("retirementApprovedAt", None)
+    retirement.setdefault("lastHealthyAbsenceObservedAt", None)
+    legacy_approvals = {
+        key: retirement.pop(key)
+        for key in (
+            "sourceDeletionConfirmedAt",
             "sourceRetirementApprovedAt",
-            retirement.pop("sourceDeletionConfirmedAt"),
+            "companionRegistrationRetirementApprovedAt",
+            "agentIdentityRetirementApprovedAt",
         )
-    retirement.setdefault("companionRegistrationRetirementApprovedAt", None)
-    retirement.setdefault("agentIdentityRetirementApprovedAt", None)
+        if key in retirement
+    }
+    if legacy_approvals:
+        retirement.setdefault("legacyApprovalHistory", {}).update(
+            legacy_approvals
+        )
+    hold = result.setdefault(
+        "reconciliationHold",
+        {
+            "status": "clear",
+            "reason": None,
+            "observedAt": None,
+            "packageId": None,
+            "resolvedAt": None,
+            "previousSourceObservation": None,
+            "previousSourceObservedAt": None,
+        },
+    )
+    watermark = result.get("safetyWatermarkAt")
+    if not isinstance(watermark, str):
+        watermark = latest_observation_timestamp(result)
+    if isinstance(watermark, str) and event_time < parsed_timestamp(
+        watermark,
+        "safetyWatermarkAt",
+    ):
+        raise ValueError("event timestamp cannot move safety state backward")
+    result["blueprintCleanup"].setdefault(
+        "blueprintDelete",
+        {
+            "status": "not-started",
+            "startedAt": None,
+            "verifiedAt": None,
+        },
+    )
+    if hold.get("status") == "blocked" and event in {
+        "registration-retired",
+        "companion-package-pending",
+        "companion-package-retired",
+        "identity-retired",
+        "blueprint-membership-observed",
+        "blueprint-delete-started",
+        "blueprint-retired",
+        "blueprint-principal-retired",
+    }:
+        raise ValueError(
+            "Source reappearance hold must be cleared before cleanup resumes"
+        )
 
     if event == "source-missing":
-        require_state(result, "providerSource", {"active", "pending"})
-        require_state(result, "registrySyncPackage", {"active", "pending"})
+        provider_source = require_state(
+            result,
+            "providerSource",
+            {"active", "pending", "retired"},
+        )
+        registry_package = require_state(
+            result,
+            "registrySyncPackage",
+            {"active", "pending", "retired"},
+        )
+        previous_observation = retirement.get(
+            "lastHealthyAbsenceObservedAt"
+        )
+        if isinstance(previous_observation, str) and event_time < (
+            parsed_timestamp(
+                previous_observation,
+                "lastHealthyAbsenceObservedAt",
+            )
+        ):
+            raise ValueError(
+                "source-missing observation cannot move backward in time"
+            )
         retirement["missingSince"] = retirement.get("missingSince") or at
+        retirement["lastHealthyAbsenceObservedAt"] = at
+        retirement["lastSourceObservation"] = "absent"
+        retirement["lastSourceObservedAt"] = at
         if grace_period_ends_at is not None:
-            retirement["gracePeriodEndsAt"] = validated_timestamp(
+            deadline = validated_timestamp(
                 grace_period_ends_at,
                 "--grace-period-ends-at",
             )
+            if parsed_timestamp(deadline, "--grace-period-ends-at") <= (
+                parsed_timestamp(retirement["missingSince"], "missingSince")
+            ):
+                raise ValueError(
+                    "--grace-period-ends-at must be after missingSince"
+                )
+            retirement["gracePeriodEndsAt"] = deadline
         lifecycle_reason = reason
         if lifecycle_reason is None:
             deadline = retirement.get("gracePeriodEndsAt")
@@ -250,18 +423,20 @@ def apply_event(
             else:
                 lifecycle_reason = "awaiting-healthy-sync"
         result["lifecycleReason"] = lifecycle_reason
-        set_object_state(
-            retirement["providerSource"],
-            "pending",
-            "provider-presence-unconfirmed",
-            at,
-        )
-        set_object_state(
-            retirement["registrySyncPackage"],
-            "pending",
-            "not-observed-in-complete-inventory",
-            at,
-        )
+        if provider_source["status"] != "retired":
+            set_object_state(
+                provider_source,
+                "pending",
+                "provider-presence-unconfirmed",
+                at,
+            )
+        if registry_package["status"] != "retired":
+            set_object_state(
+                registry_package,
+                "pending",
+                "not-observed-in-complete-inventory",
+                at,
+            )
     elif event == "configure-simulation-grace":
         require_state(result, "providerSource", {"pending"})
         require_state(result, "registrySyncPackage", {"pending"})
@@ -314,6 +489,9 @@ def apply_event(
                 previous.append(old_package_id)
         result["packageId"] = package_id
         retirement["missingSince"] = None
+        retirement["lastHealthyAbsenceObservedAt"] = None
+        retirement["lastSourceObservation"] = "present"
+        retirement["lastSourceObservedAt"] = at
         retirement["gracePeriodEndsAt"] = None
         result["lifecycleReason"] = "source-active"
         set_object_state(
@@ -328,96 +506,224 @@ def apply_event(
             "observed-in-inventory",
             at,
         )
-    elif event == "source-retirement-approved":
-        require_state(result, "providerSource", {"pending"})
-        require_state(result, "registrySyncPackage", {"pending"})
+    elif event == "source-reappeared":
+        if not package_id:
+            raise ValueError("source-reappeared requires --package-id")
+        if not retirement.get("retirementApprovedAt"):
+            raise ValueError(
+                "Use source-relocated before retirement approval"
+            )
+        latest_hold_time = hold.get("resolvedAt") or hold.get("observedAt")
+        if isinstance(latest_hold_time, str) and event_time < parsed_timestamp(
+            latest_hold_time,
+            "reconciliationHold timestamp",
+        ):
+            raise ValueError(
+                "source-reappeared observation cannot move backward in time"
+            )
+        old_package_id = result.get("packageId")
+        if old_package_id and old_package_id != package_id:
+            previous = result.setdefault("previousPackageIds", [])
+            if old_package_id not in previous:
+                previous.append(old_package_id)
+        result["packageId"] = package_id
+        hold_was_blocked = hold.get("status") == "blocked"
+        if not hold_was_blocked:
+            hold["previousSourceObservation"] = retirement.get(
+                "lastSourceObservation"
+            )
+            hold["previousSourceObservedAt"] = retirement.get(
+                "lastSourceObservedAt"
+            )
+        retirement["lastSourceObservation"] = "present"
+        retirement["lastSourceObservedAt"] = at
+        hold.update(
+            {
+                "status": "blocked",
+                "reason": "source-reappeared-during-retirement",
+                "observedAt": at,
+                "packageId": package_id,
+                "resolvedAt": None,
+            }
+        )
+        if result["blueprintCleanup"]["blueprint"]["status"] != "retired":
+            invalidate_blueprint_eligibility(result, at)
+    elif event == "source-reappearance-cleared":
+        if hold.get("status") != "blocked" or not reason:
+            raise ValueError(
+                "source-reappearance-cleared requires an active hold and "
+                "an evidence-backed --reason"
+            )
+        if event_time < parsed_timestamp(
+            hold["observedAt"],
+            "reconciliationHold.observedAt",
+        ):
+            raise ValueError(
+                "source-reappearance clearance cannot precede the hold"
+            )
+        hold["status"] = "clear"
+        hold["reason"] = f"cleared:{reason}"
+        hold["resolvedAt"] = at
+        retirement["lastSourceObservation"] = hold.get(
+            "previousSourceObservation"
+        )
+        retirement["lastSourceObservedAt"] = hold.get(
+            "previousSourceObservedAt"
+        )
+    elif event == "retirement-approved":
+        provider_source = require_state(
+            result,
+            "providerSource",
+            {"pending", "retired"},
+        )
+        registry_package = require_state(
+            result,
+            "registrySyncPackage",
+            {"pending", "retired"},
+        )
         grace_period_ends_at = retirement.get("gracePeriodEndsAt")
         if not isinstance(grace_period_ends_at, str):
             raise ValueError(
-                "source-retirement-approved requires a grace-period deadline"
+                "retirement-approved requires a grace-period deadline"
             )
         grace_deadline = parsed_timestamp(
             grace_period_ends_at,
             "gracePeriodEndsAt",
         )
+        missing_since = parsed_timestamp(
+            retirement.get("missingSince", ""),
+            "missingSince",
+        )
+        if grace_deadline <= missing_since:
+            raise ValueError(
+                "retirement-approved requires missingSince before the "
+                "grace deadline"
+            )
         if event_time < grace_deadline:
             raise ValueError(
-                "source-retirement-approved rejected: "
+                "retirement-approved rejected: "
                 "the grace period has not ended"
             )
-        retirement["sourceRetirementApprovedAt"] = at
-        result["lifecycleReason"] = "companion-retirement-pending"
-        set_object_state(
-            retirement["providerSource"],
-            "retired",
-            reason or "retired-by-sustained-registry-absence-policy",
-            at,
+        last_absence = retirement.get("lastHealthyAbsenceObservedAt")
+        if not isinstance(last_absence, str) or parsed_timestamp(
+            last_absence,
+            "lastHealthyAbsenceObservedAt",
+        ) < grace_deadline:
+            raise ValueError(
+                "retirement-approved requires a healthy complete absence "
+                "observation at or after the grace deadline"
+            )
+        absence_observation = parsed_timestamp(
+            last_absence,
+            "lastHealthyAbsenceObservedAt",
         )
-        set_object_state(
-            retirement["registrySyncPackage"],
-            "retired",
-            "absence-confirmed-after-grace-period",
-            at,
+        if (
+            retirement.get("lastSourceObservation") != "absent"
+            or retirement.get("lastSourceObservedAt") != last_absence
+        ):
+            raise ValueError(
+                "retirement-approved requires the current source "
+                "observation to be absent"
+            )
+        if absence_observation > event_time:
+            raise ValueError(
+                "retirement approval cannot precede its absence observation"
+            )
+        if (
+            max_observation_age_minutes is None
+            or max_observation_age_minutes <= 0
+        ):
+            raise ValueError(
+                "retirement-approved requires a positive "
+                "--max-observation-age-minutes"
+            )
+        if event_time - absence_observation > timedelta(
+            minutes=max_observation_age_minutes
+        ):
+            raise ValueError(
+                "retirement-approved requires a fresh absence observation"
+            )
+        require_state(
+            result,
+            "companionRegistration",
+            {"active", "pending", "retired"},
         )
-        set_object_state(
-            retirement["companionRegistration"],
-            "pending",
-            "approval-required",
-            at,
-        )
-    elif event == "registration-retirement-approved":
-        require_state(result, "providerSource", {"retired"})
-        require_state(result, "registrySyncPackage", {"retired"})
-        registration = require_state(
-            result, "companionRegistration", {"pending"}
-        )
-        retirement["companionRegistrationRetirementApprovedAt"] = at
-        result["lifecycleReason"] = "companion-retirement-approved"
-        set_object_state(
-            registration,
-            "pending",
-            "retirement-approved",
-            at,
-        )
+        if not retirement.get("retirementApprovedAt"):
+            retirement["retirementApprovedAt"] = at
+            retirement["approvalObservationMaxAgeMinutes"] = (
+                max_observation_age_minutes
+            )
+        result["lifecycleReason"] = "automatic-retirement-in-progress"
+        if provider_source["status"] != "retired":
+            set_object_state(
+                provider_source,
+                "retired",
+                reason or "retired-by-sustained-registry-absence-policy",
+                at,
+            )
+        if registry_package["status"] != "retired":
+            set_object_state(
+                registry_package,
+                "retired",
+                "absence-confirmed-after-grace-period",
+                at,
+            )
+        registration = retirement["companionRegistration"]
+        if registration["status"] != "retired":
+            set_object_state(
+                registration,
+                "pending",
+                "retirement-approved",
+                at,
+            )
     elif event == "registration-retired":
         require_state(result, "providerSource", {"retired"})
         require_state(result, "registrySyncPackage", {"retired"})
-        if not retirement.get(
-            "companionRegistrationRetirementApprovedAt"
-        ):
+        if not retirement.get("retirementApprovedAt"):
             raise ValueError(
-                "Registration retirement approval must be recorded before "
+                "Retirement approval must be recorded before "
                 "registration-retired"
             )
         registration = require_state(
-            result, "companionRegistration", {"active", "pending"}
+            result,
+            "companionRegistration",
+            {"active", "pending", "retired"},
         )
         companion_package = require_state(
-            result, "companionPackage", {"active", "pending"}
+            result,
+            "companionPackage",
+            {"active", "pending", "retired"},
         )
         set_object_state(
             registration, "retired", reason or "deletion-verified", at
         )
-        set_object_state(
-            companion_package,
-            "pending",
-            "awaiting-removal-propagation",
-            at,
-        )
+        if companion_package["status"] != "retired":
+            set_object_state(
+                companion_package,
+                "pending",
+                "awaiting-removal-propagation",
+                at,
+            )
     elif event == "companion-package-retired":
         require_state(result, "companionRegistration", {"retired"})
         companion_package = require_state(
-            result, "companionPackage", {"pending"}
+            result, "companionPackage", {"pending", "retired"}
         )
         set_object_state(
             companion_package, "retired", reason or "deletion-verified", at
         )
-        set_object_state(
-            retirement["agentIdentity"],
-            "pending",
-            "approval-required",
-            at,
+        identity = require_state(
+            result,
+            "agentIdentity",
+            {"active", "pending", "retired"},
         )
+        if identity["status"] != "retired":
+            set_object_state(
+                identity,
+                "pending",
+                "retirement-approved",
+                at,
+            )
     elif event == "companion-package-pending":
         require_state(result, "companionRegistration", {"retired"})
         companion_package = require_state(
@@ -429,27 +735,16 @@ def apply_event(
             reason or "awaiting-removal-propagation",
             at,
         )
-    elif event == "identity-retirement-approved":
-        require_state(result, "companionRegistration", {"retired"})
-        require_state(result, "companionPackage", {"retired"})
-        identity = require_state(result, "agentIdentity", {"pending"})
-        retirement["agentIdentityRetirementApprovedAt"] = at
-        set_object_state(
-            identity,
-            "pending",
-            "retirement-approved",
-            at,
-        )
     elif event == "identity-retired":
         require_state(result, "companionRegistration", {"retired"})
         require_state(result, "companionPackage", {"retired"})
-        if not retirement.get("agentIdentityRetirementApprovedAt"):
+        if not retirement.get("retirementApprovedAt"):
             raise ValueError(
-                "Agent Identity retirement approval must be recorded before "
+                "Retirement approval must be recorded before "
                 "identity-retired"
             )
         identity = require_state(
-            result, "agentIdentity", {"active", "pending"}
+            result, "agentIdentity", {"active", "pending", "retired"}
         )
         set_object_state(
             identity, "retired", reason or "deletion-verified", at
@@ -469,6 +764,7 @@ def apply_event(
                 object_name,
                 {"active", "pending", "blocked"},
             )
+            invalidate_blueprint_eligibility(result, at)
         else:
             raise ValueError(f"Unknown object: {object_name}")
         set_object_state(
@@ -477,48 +773,252 @@ def apply_event(
             reason or "manual-review-required",
             at,
         )
-    elif event == "blueprint-cleanup-started":
-        if result.get("assignmentMode") != "dedicated":
-            raise ValueError("Shared Blueprint cleanup cannot start per source")
+    elif event == "block-resolved":
+        if not object_name or not reason:
+            raise ValueError(
+                "block-resolved requires --object and an evidence-backed "
+                "--reason"
+            )
+        if object_name in SOURCE_OBJECTS:
+            state = require_state(result, object_name, {"blocked"})
+            if object_name in {"providerSource", "registrySyncPackage"}:
+                status = "pending"
+                resolved_reason = "reconciliation-pending"
+            elif object_name == "companionRegistration":
+                status = (
+                    "pending"
+                    if retirement.get("retirementApprovedAt")
+                    else "active"
+                )
+                resolved_reason = (
+                    "retirement-approved"
+                    if status == "pending"
+                    else "verified-present"
+                )
+            elif object_name == "companionPackage":
+                registration_status = retirement[
+                    "companionRegistration"
+                ]["status"]
+                status = "pending" if registration_status == "retired" else "active"
+                resolved_reason = (
+                    "awaiting-removal-propagation"
+                    if status == "pending"
+                    else "verified-present"
+                )
+            else:
+                package_status = retirement["companionPackage"]["status"]
+                status = "pending" if package_status == "retired" else "active"
+                resolved_reason = (
+                    "retirement-approved"
+                    if status == "pending"
+                    else "verified-present"
+                )
+        elif object_name in BLUEPRINT_OBJECTS:
+            state = require_blueprint_state(result, object_name, {"blocked"})
+            delete_pending = (
+                result["blueprintCleanup"]["blueprintDelete"]["status"]
+                == "pending"
+            )
+            blueprint_retired = (
+                result["blueprintCleanup"]["blueprint"]["status"]
+                == "retired"
+            )
+            if object_name == "blueprintPrincipal" and blueprint_retired:
+                status = "pending"
+                resolved_reason = "awaiting-cascade-verification"
+            elif object_name == "blueprint" and delete_pending:
+                invalidate_blueprint_eligibility(result, at)
+                status = "pending"
+                resolved_reason = "awaiting-deletion-verification"
+            else:
+                invalidate_blueprint_eligibility(result, at)
+                status = "active"
+                resolved_reason = "awaiting-membership-recheck"
+        else:
+            raise ValueError(f"Unknown object: {object_name}")
+        set_object_state(
+            state,
+            status,
+            f"{resolved_reason}:{reason}",
+            at,
+        )
+    elif event == "blueprint-membership-observed":
         if result.get("lifecycleStatus") != "retired":
             raise ValueError(
                 "Source retirement must finish before Blueprint cleanup"
             )
-        cleanup = result["blueprintCleanup"]
-        for name in BLUEPRINT_OBJECTS:
-            state = require_blueprint_state(
-                result,
-                name,
-                {"active", "pending"},
+        if not retirement.get("retirementApprovedAt"):
+            raise ValueError(
+                "Blueprint cleanup requires explicit retirement approval"
             )
-            if state.get("status") == "active":
+        latest_evidence_time = result["blueprintCleanup"].get(
+            "lastCheckedAt"
+        )
+        invalidated_at = result["blueprintCleanup"].get(
+            "eligibilityInvalidatedAt"
+        )
+        for field, value in (
+            ("blueprintCleanup.lastCheckedAt", latest_evidence_time),
+            ("blueprintCleanup.eligibilityInvalidatedAt", invalidated_at),
+            ("reconciliationHold.resolvedAt", hold.get("resolvedAt")),
+        ):
+            if isinstance(value, str) and event_time < parsed_timestamp(
+                value,
+                field,
+            ):
+                raise ValueError(
+                    "blueprint membership observation cannot move backward "
+                    "in time"
+                )
+        identity_retired_at = retirement["agentIdentity"].get("retiredAt")
+        if not isinstance(identity_retired_at, str) or event_time < (
+            parsed_timestamp(identity_retired_at, "agentIdentity.retiredAt")
+        ):
+            raise ValueError(
+                "Blueprint membership must be observed after Agent Identity "
+                "retirement"
+            )
+        if remaining_agent_identities is None or remaining_agent_identities < 0:
+            raise ValueError(
+                "blueprint-membership-observed requires a non-negative "
+                "--remaining-agent-identities"
+            )
+        if (
+            pending_identity_reservations is None
+            or pending_identity_reservations < 0
+        ):
+            raise ValueError(
+                "blueprint-membership-observed requires a non-negative "
+                "--pending-identity-reservations"
+            )
+        if not blueprint_id or blueprint_id != result.get("blueprintId"):
+            raise ValueError(
+                "--blueprint-id must match the locked mapping Blueprint appId"
+            )
+        if not enumeration_complete:
+            raise ValueError(
+                "Blueprint membership enumeration must be complete"
+            )
+        if not onboarding_exclusion_held:
+            raise ValueError(
+                "Blueprint onboarding exclusion must remain held through "
+                "deletion"
+            )
+        cleanup = result["blueprintCleanup"]
+        cleanup["remainingAgentIdentities"] = remaining_agent_identities
+        cleanup["pendingIdentityReservations"] = (
+            pending_identity_reservations
+        )
+        cleanup["lastCheckedAt"] = at
+        cleanup["membershipEvidence"] = {
+            "blueprintId": blueprint_id,
+            "observedAt": at,
+            "enumerationComplete": True,
+            "onboardingExclusionHeld": True,
+        }
+        if (
+            remaining_agent_identities == 0
+            and pending_identity_reservations == 0
+        ):
+            for name in BLUEPRINT_OBJECTS:
+                state = require_blueprint_state(
+                    result,
+                    name,
+                    {"active", "pending"},
+                )
                 set_object_state(
                     state,
                     "pending",
-                    reason or "deletion-approved",
+                    reason or "automatic-cleanup-ready",
                     at,
                 )
-        cleanup["reason"] = "dedicated-group-empty"
+            cleanup["reason"] = "group-empty-automatic-cleanup"
+        else:
+            for name in BLUEPRINT_OBJECTS:
+                state = require_blueprint_state(
+                    result,
+                    name,
+                    {"active", "pending"},
+                )
+                set_object_state(state, "active", "verified-present", at)
+            cleanup["reason"] = "group-not-empty"
+    elif event == "blueprint-delete-started":
+        if result.get("lifecycleStatus") != "retired":
+            raise ValueError(
+                "Source retirement must finish before Blueprint deletion"
+            )
+        if not retirement.get("retirementApprovedAt"):
+            raise ValueError(
+                "Blueprint deletion requires explicit retirement approval"
+            )
+        cleanup = result["blueprintCleanup"]
+        if cleanup.get("status") == "blocked":
+            raise ValueError(
+                "Blueprint deletion cannot start while cleanup is blocked"
+            )
+        if (
+            cleanup.get("remainingAgentIdentities") != 0
+            or cleanup.get("pendingIdentityReservations") != 0
+            or not cleanup.get("membershipEvidence", {}).get(
+                "onboardingExclusionHeld"
+            )
+        ):
+            raise ValueError(
+                "Blueprint deletion requires fresh empty-group eligibility"
+            )
+        require_blueprint_state(result, "blueprint", {"pending"})
+        require_blueprint_state(result, "blueprintPrincipal", {"pending"})
+        delete_state = cleanup["blueprintDelete"]
+        if delete_state["status"] == "not-started":
+            delete_state["status"] = "pending"
+            delete_state["startedAt"] = at
     elif event in {"blueprint-retired", "blueprint-principal-retired"}:
-        if result.get("assignmentMode") != "dedicated":
-            raise ValueError("Shared Blueprint objects remain group-owned")
         if result.get("lifecycleStatus") != "retired":
             raise ValueError(
                 "Source retirement must finish before Blueprint cleanup"
             )
+        if not retirement.get("retirementApprovedAt"):
+            raise ValueError(
+                "Blueprint cleanup requires explicit retirement approval"
+            )
+        cleanup = result["blueprintCleanup"]
         name = (
             "blueprint"
             if event == "blueprint-retired"
             else "blueprintPrincipal"
         )
-        state = require_blueprint_state(result, name, {"pending"})
+        if name == "blueprint":
+            delete_status = cleanup["blueprintDelete"]["status"]
+            current_status = cleanup["blueprint"]["status"]
+            if delete_status == "verified" and current_status == "retired":
+                recalculate(result)
+                result["safetyWatermarkAt"] = at
+                return result
+            if delete_status != "pending":
+                raise ValueError(
+                    "blueprint-retired requires blueprint-delete-started"
+                )
+        elif cleanup["blueprint"]["status"] != "retired":
+            raise ValueError(
+                "Blueprint principal retirement requires verified Blueprint "
+                "retirement"
+            )
+        state = require_blueprint_state(
+            result,
+            name,
+            {"pending", "retired"},
+        )
         set_object_state(
             state, "retired", reason or "deletion-verified", at
         )
+        if name == "blueprint":
+            cleanup["blueprintDelete"]["status"] = "verified"
+            cleanup["blueprintDelete"]["verifiedAt"] = at
     else:
         raise ValueError(f"Unsupported event: {event}")
 
     recalculate(result)
+    result["safetyWatermarkAt"] = at
     return result
 
 
@@ -531,7 +1031,26 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def save_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    serialized = json.dumps(value, indent=2) + "\n"
+    staging_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as staging:
+            staging_path = Path(staging.name)
+            staging.write(serialized)
+            staging.flush()
+            os.fsync(staging.fileno())
+        os.replace(staging_path, path)
+    finally:
+        if staging_path is not None and staging_path.exists():
+            staging_path.unlink()
 
 
 def parser() -> argparse.ArgumentParser:
@@ -551,15 +1070,17 @@ def parser() -> argparse.ArgumentParser:
             "source-missing",
             "configure-simulation-grace",
             "source-relocated",
-            "source-retirement-approved",
-            "registration-retirement-approved",
+            "source-reappeared",
+            "source-reappearance-cleared",
+            "retirement-approved",
             "registration-retired",
             "companion-package-pending",
             "companion-package-retired",
-            "identity-retirement-approved",
             "identity-retired",
             "block-object",
-            "blueprint-cleanup-started",
+            "block-resolved",
+            "blueprint-membership-observed",
+            "blueprint-delete-started",
             "blueprint-retired",
             "blueprint-principal-retired",
         ),
@@ -569,6 +1090,18 @@ def parser() -> argparse.ArgumentParser:
     event_parser.add_argument("--grace-period-ends-at")
     event_parser.add_argument("--simulation-grace-minutes", type=int)
     event_parser.add_argument("--production-candidate-grace-period")
+    event_parser.add_argument("--max-observation-age-minutes", type=int)
+    event_parser.add_argument("--remaining-agent-identities", type=int)
+    event_parser.add_argument("--pending-identity-reservations", type=int)
+    event_parser.add_argument("--blueprint-id")
+    event_parser.add_argument(
+        "--enumeration-complete",
+        action="store_true",
+    )
+    event_parser.add_argument(
+        "--onboarding-exclusion-held",
+        action="store_true",
+    )
     event_parser.add_argument(
         "--object",
         choices=SOURCE_OBJECTS + BLUEPRINT_OBJECTS,
@@ -595,6 +1128,16 @@ def main() -> None:
                 simulation_grace_minutes=args.simulation_grace_minutes,
                 production_candidate_grace_period=(
                     args.production_candidate_grace_period
+                ),
+                remaining_agent_identities=args.remaining_agent_identities,
+                pending_identity_reservations=(
+                    args.pending_identity_reservations
+                ),
+                blueprint_id=args.blueprint_id,
+                enumeration_complete=args.enumeration_complete,
+                onboarding_exclusion_held=args.onboarding_exclusion_held,
+                max_observation_age_minutes=(
+                    args.max_observation_age_minutes
                 ),
             )
         save_json(args.output, updated)

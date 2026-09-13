@@ -634,25 +634,38 @@ Use this reconciliation sequence:
    provider that the source agent was deleted. Without adequate confirmation,
    leave `lifecycleStatus: pending` with a reason describing the missing
    evidence or safety gate.
+   Record a new complete healthy absence observation at or after the grace
+   deadline; elapsed time alone is not deletion evidence.
 5. Lock the source mapping and read the mapped companion Registration, Agent
    Identity, and Blueprint. Verify that they belong to the expected source and
    identify any runtime, authorization, registration, or other mapping
    dependents.
-6. After explicit source-retirement approval, mark the provider source and
-   Registry Sync Package retired, then require a separate companion
-   Registration retirement approval.
-7. DELETE the known companion Registration ID first. GET the same ID and
+6. After the grace period and dependency review, require one explicit
+   retirement-plan approval. It covers source retirement, companion
+   Registration deletion, the dedicated Agent Identity, and automatic
+   Blueprint cleanup if the Blueprint is later verified empty.
+7. The automated action runner marks the provider source and Registry Sync
+   Package retired, then DELETEs the known companion Registration ID first.
+   GET the same ID after a `204`, timeout, or lost response and
    require an observed not-found result, then re-read complete Package
    inventory and the original Package independently. Do not assume
    Registration deletion automatically removes a catalog record.
-8. Delete the Agent Identity only under separate approval, after the
+8. Under the same approval, delete the Agent Identity after the
    Registration is retired and complete inventory confirms companion Package
    absence, and only when no remaining runtime binding, grant, policy,
    membership, owner workflow, or other consumer depends on it.
-9. Retain the mapped group Blueprint unless its own separately approved
-   retirement process proves that it is dedicated, empty, and no longer
-   needed. Track Blueprint and principal cleanup independently. Never delete a
-   shared Blueprint for one retired source.
+9. After Agent Identity retirement, automatically count other active or
+   pending Agent Identities assigned to the Blueprint through complete
+   paginated directory enumeration, and check pending or unresolved identity
+   creation reservations in the mapping journal. Hold a group-level onboarding
+   exclusion through deletion. Retain or block on incomplete evidence. When
+   both verified counts are zero, automatically delete the Blueprint under the
+   existing retirement approval and verify both Blueprint and principal
+   cleanup independently. Persist a delete-started checkpoint before issuing
+   DELETE. Exact-ID absence may complete an unknown issued outcome without
+   rebuilding eligibility, but any retry against a still-present Blueprint
+   requires a fresh zero/zero observation under the current exclusion. A block
+   on either the Blueprint or principal prevents initial deletion and retry.
 10. Preserve a tombstone in the durable mapping with the source key, former
    object IDs, deletion reason, timestamps, and final outcomes. The tombstone
    prevents stale inventory from silently creating a replacement companion.
@@ -670,9 +683,17 @@ independent `blueprintCleanup.status` uses the same aggregate progression so a
 shared or retained Blueprint does not prevent source retirement.
 
 If Registration deletion succeeds but Package propagation, Agent Identity
-cleanup, or dedicated Blueprint cleanup is blocked or fails, preserve that
+cleanup, or empty-Blueprint cleanup is blocked or fails, preserve that
 partial state and retry only the incomplete step according to its documented
-semantics. Do not recreate the Registration as recovery.
+semantics. A block remains sticky until a new observation or reviewed
+dependency resolution explicitly clears it. Do not recreate the Registration
+as recovery.
+
+If the scoped provider source reappears after approval, stop remaining
+destructive work and block the mapping for explicit reconciliation. Preserve
+the tombstone and record the new Package ID; do not silently reactivate the
+mapping. Keep source presence and absence in one ordered observation history,
+and reject any lifecycle event older than the shared safety watermark.
 
 ### Observed disposable GCP result
 
@@ -685,9 +706,10 @@ Demo 03 exercised this sequence end to end:
 - Registration deletion produced an observed not-found read and the companion
   Package was absent from the first subsequent complete inventory;
 - the Agent Identity remained present after Registration deletion and required
-  its own soft deletion;
+  its own soft deletion, but not a separate business approval in the scalable
+  workflow;
 - the dedicated Blueprint remained present after source retirement and
-  required separate cleanup; and
+  was eligible for automatic cleanup after the group was verified empty; and
 - deleting that Blueprint also removed its principal by the first follow-up
   read, while the mapping still verified both objects independently.
 
@@ -701,9 +723,9 @@ time guarantee, or a cross-provider contract.
 Delete follows the executable dependency order rather than visually replaying
 Add in reverse-labelled regions. After detection and confirmation, retire the
 companion Registration first, independently verify companion Package absence,
-then decide whether the Agent Identity can be retired. Blueprint cleanup stays
-outside per-source cleanup and runs only for a separately approved,
-confirmed-empty dedicated group.
+then automatically retire the Agent Identity under the same approval.
+Blueprint cleanup follows automatically only when no other active or pending
+Agent Identity remains.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"background":"#ffffff","primaryColor":"#ffffff","primaryTextColor":"#111827","primaryBorderColor":"#334155","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","lineColor":"#334155","textColor":"#111827","clusterBkg":"#ffffff","clusterBorder":"#334155","titleColor":"#111827","edgeLabelBackground":"#ffffff","fontSize":"16px"}}}%%
@@ -745,7 +767,7 @@ flowchart TB
 
     subgraph PART2["<b>PART 2: DECIDE WHETHER TO DELETE THE AGENT IDENTITY</b>"]
         direction TB
-        D1{"Is this Identity used only by this agent,<br/>unused everywhere else,<br/>and separately approved for deletion?"}
+        D1{"Is this Identity used only by this agent<br/>and unused everywhere else?"}
         D2["No: keep the Agent Identity"]
         D3["Yes: delete the Agent Identity"]
         D4["Read it again;<br/>404 confirms it is gone"]
@@ -754,9 +776,9 @@ flowchart TB
         D3 --> D4
     end
 
-    subgraph PART1["<b>FINAL: REVIEW BLUEPRINT GROUP CLEANUP SEPARATELY</b>"]
+    subgraph PART1["<b>FINAL: CHECK BLUEPRINT MEMBERSHIP AUTOMATICALLY</b>"]
         direction TB
-        C1["Shared: keep the Blueprint<br/><br/>Dedicated: delete only after a separate review proves the group is empty"]
+        C1["Other identities remain: keep it<br/><br/>No identities remain: delete and verify it automatically"]
         C2["Keep a permanent deletion record<br/>with the old source and object IDs"]
         C1 --> C2
     end
@@ -776,8 +798,8 @@ flowchart TB
 
 The destructive path uses only IDs recovered from the locked mapping.
 Registration deletion always precedes Agent Identity deletion. Shared
-Blueprints remain group-owned. Dedicated Blueprint cleanup is a later,
-separately approved garbage-collection step.
+or dedicated Blueprints are retained while non-empty and cleaned up
+automatically when the verified remaining Agent Identity count reaches zero.
 
 ## DD-007: Rename lifecycle
 

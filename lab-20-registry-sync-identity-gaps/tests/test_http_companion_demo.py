@@ -1104,6 +1104,7 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
             "deleteGetIdentityAfter",
             "deleteGetBlueprintBeforeCleanup",
             "deleteGetBlueprintPrincipalBeforeCleanup",
+            "deleteListBlueprintAgentIdentities",
             "deleteBlueprintStartDeviceCode",
             "deleteBlueprintToken",
             "deleteDedicatedBlueprint",
@@ -1113,33 +1114,30 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
         ]
         self.assertEqual(names, expected)
 
-    def test_delete_is_gated_and_registration_is_deleted_first(self):
-        stop_a1 = self.text.index(
-            "# Stop A - approve source retirement after the grace period"
+    def test_one_approval_gates_the_automated_retirement_sequence(self):
+        approval = self.text.index(
+            "# Single Stop A - approve the complete retirement plan"
         )
-        stop_a2 = self.text.index(
-            "# Stop A2 - separately approve companion Registration retirement"
-        )
-        registration_approval = self.text.index(
-            "event registration-retirement-approved"
-        )
+        approval_event = self.text.index("event retirement-approved")
         registration_delete = self.text.index(
             "\nDELETE {{graphBaseUrl}}/beta/copilot/agentRegistrations/"
-        )
-        stop_b = self.text.index("# Stop B - separately approve Agent Identity")
-        identity_approval = self.text.index(
-            "event identity-retirement-approved"
         )
         identity_delete = self.text.index(
             "\nDELETE {{graphBaseUrl}}/v1.0/servicePrincipals/"
         )
-        self.assertLess(stop_a1, stop_a2)
-        self.assertLess(stop_a2, registration_approval)
-        self.assertLess(registration_approval, registration_delete)
-        self.assertLess(registration_delete, stop_b)
-        self.assertLess(stop_b, identity_approval)
-        self.assertLess(identity_approval, identity_delete)
-        self.assertLess(stop_b, identity_delete)
+        membership_check = self.text.index(
+            "event blueprint-membership-observed"
+        )
+        blueprint_delete = self.text.index(
+            "\nDELETE {{graphBaseUrl}}/v1.0/applications/"
+        )
+        self.assertLess(approval, approval_event)
+        self.assertLess(approval_event, registration_delete)
+        self.assertLess(registration_delete, identity_delete)
+        self.assertLess(identity_delete, membership_check)
+        self.assertLess(membership_check, blueprint_delete)
+        self.assertNotIn("event registration-retirement-approved", self.text)
+        self.assertNotIn("event identity-retirement-approved", self.text)
 
     def test_graph_requests_use_explicit_delete_token(self):
         for name, block in self.blocks.items():
@@ -1166,27 +1164,38 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
                 block,
             )
 
-    def test_dedicated_blueprint_cleanup_is_separately_gated(self):
-        stop_c = self.text.index(
-            "# Stop C - separately approve dedicated Blueprint group cleanup"
+    def test_empty_blueprint_cleanup_is_automatic(self):
+        membership_check = self.text.index(
+            "# Automatic Blueprint membership decision"
         )
         blueprint_delete = self.text.index(
             "\nDELETE {{graphBaseUrl}}/v1.0/applications/"
             "{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint"
         )
-        self.assertLess(stop_c, blueprint_delete)
+        self.assertLess(membership_check, blueprint_delete)
         self.assertIn(
-            "This file never deletes a shared Blueprint",
+            "This file never deletes a non-empty Blueprint",
             self.text,
         )
-        self.assertIn("Skip all remaining Part 5 requests for shared mode", self.text)
+        self.assertIn("group-empty-automatic-cleanup", self.text)
+        self.assertIn(
+            "--remaining-agent-identities <verified-active-count>",
+            self.text,
+        )
+        self.assertIn("--pending-identity-reservations", self.text)
+        self.assertIn("--enumeration-complete", self.text)
+        self.assertIn("--onboarding-exclusion-held", self.text)
         self.assertNotRegex(
             self.text,
             r"(?m)^DELETE .*servicePrincipals.*blueprintPrincipal",
         )
         self.assertIn("Do not erase the mapping.", self.text)
         self.assertIn(
-            "Agent Identity and Blueprint deletion are soft deletion",
+            "Agent Identity and Blueprint",
+            self.text,
+        )
+        self.assertIn(
+            "deletion are soft deletion",
             self.text,
         )
         self.assertIn(
@@ -1203,14 +1212,14 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
             "configure-simulation-grace",
             "source-missing",
             "source-relocated",
-            "source-retirement-approved",
-            "registration-retirement-approved",
+            "source-reappeared",
+            "retirement-approved",
             "registration-retired",
             "companion-package-pending",
             "companion-package-retired",
-            "identity-retirement-approved",
             "identity-retired",
-            "blueprint-cleanup-started",
+            "blueprint-membership-observed",
+            "blueprint-delete-started",
             "blueprint-retired",
             "blueprint-principal-retired",
         ):
@@ -1299,6 +1308,10 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
             (
                 "deleteGetBlueprintPrincipalBeforeCleanup",
                 "blueprint-principal-before-cleanup.json",
+            ),
+            (
+                "deleteListBlueprintAgentIdentities",
+                "agent-identities-before-blueprint-cleanup-page-1.json",
             ),
             ("deleteGetBlueprintAfter", "blueprint-after-cleanup.json"),
             (
