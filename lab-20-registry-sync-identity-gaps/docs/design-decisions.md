@@ -655,9 +655,11 @@ Use this reconciliation sequence:
    absence, and only when no remaining runtime binding, grant, policy,
    membership, owner workflow, or other consumer depends on it.
 9. After Agent Identity retirement, automatically count other active or
-   pending Agent Identities assigned to the Blueprint through complete
-   paginated directory enumeration, and check pending or unresolved identity
-   creation reservations in the mapping journal. Hold a group-level onboarding
+   pending Agent Identities using the supported server-side
+   `agentIdentityBlueprintId` filter for the locked Blueprint app ID. Read
+   every returned page, verify each returned Identity still matches that
+   Blueprint, and check pending or unresolved identity creation reservations
+   in the mapping journal. Hold a group-level onboarding
    exclusion through deletion. Retain or block on incomplete evidence. When
    both verified counts are zero, automatically delete the Blueprint under the
    existing retirement approval and verify both Blueprint and principal

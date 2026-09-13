@@ -306,8 +306,9 @@ reconciler must:
 1. acquire a Blueprint-group onboarding exclusion that prevents new identity
    reservations, direct directory creation, restore, and every other approved
    writer path through deletion;
-2. enumerate every page of Agent Identities and match
-   `agentIdentityBlueprintId` to the locked `blueprintId`;
+2. use the supported server-side `agentIdentityBlueprintId` filter with the
+   locked `blueprintId`, enumerate every returned page, and verify every
+   returned Identity still matches that Blueprint;
 3. check the mapping journal for active, pending, unresolved, or timed-out
    identity creation reservations;
 4. bind the counts, Blueprint ID, completeness result, and observation time
@@ -374,7 +375,7 @@ for waiting. A simulation mapping records:
 {
   "retirementPolicy": {
     "mode": "experiment-simulation",
-    "gracePeriod": "PT15M",
+    "gracePeriod": "PT5M",
     "productionCandidateGracePeriod": "P14D",
     "reason": "validate-disposable-delete-lifecycle",
     "configuredAt": "2026-09-13T00:00:00Z"

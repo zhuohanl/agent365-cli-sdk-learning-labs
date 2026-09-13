@@ -60,10 +60,27 @@
 ###############################################################################
 # Mapping initialization - run once before Part 1
 #
+# Each scoped provider source requires its own durable mapping. Do not edit,
+# repoint, or overwrite a mapping whose source was already retired; that file
+# is the previous run's tombstone.
+#
+# Before rerunning this demo for another existing companion, first reconstruct
+# that companion's base mapping from its trusted creation/read evidence. The
+# evidence must establish the exact provider Package and sourceAgentId,
+# companion Package, Registration ID, Agent Identity, Blueprint application,
+# and Blueprint principal as one matching chain. Refresh the shared ignored
+# .env with those verified values.
+#
+# If the new companion has no mapping and its exact Registration ID cannot be
+# recovered from the original Registration response or another approved
+# protected record, stop. Package IDs and sourceAgentId values are not safe
+# substitutes for the Registration ID, and this demo must not discover one
+# through an undocumented collection query.
+#
 # Run from the Lab 20 directory:
 #
 # python demos/03-delete-companion/prototype_retirement_mapping.py `
-#   --mapping evidence/demos/02-rename-companion/mapping-after-rename.json `
+#   --mapping <new-agent-base-mapping.json> `
 #   --output evidence/demos/03-delete-companion/mapping.json `
 #   initialize
 #
@@ -156,6 +173,21 @@ Accept: application/json
 #
 # Save:
 # ../../evidence/demos/03-delete-companion/provider-package-before-deletion.json
+
+###############################################################################
+# REQUIRED BEFORE PART 1.4 - Resolve the mapped Blueprint object ID
+#
+# Open the ignored Demo 3 mapping created during initialization and copy its
+# exact `blueprintObjectId` value into the shared ignored .env file:
+#
+# A365_DEMO_BLUEPRINT_OBJECT_ID=<mapping.blueprintObjectId>
+#
+# Do not use `blueprintId` or the Blueprint principal ID here. `blueprintId`
+# is the application appId; this request path requires the Blueprint
+# application object ID. If `blueprintObjectId` is absent, stop and repair the
+# protected mapping rather than discovering or guessing a replacement.
+#
+# Restart or reload REST Client after changing .env.
 
 ###############################################################################
 # Part 1.4 - Verify the mapped Blueprint
@@ -453,6 +485,10 @@ Accept: application/json
 #
 # The source-missing event records the complete-inventory observation. It does
 # not convert the Package Details response into successful absence proof.
+# In production, the healthy Registry Sync reconciliation cycle emits this
+# transition after its complete inventory cannot find the exact source key.
+# The Package Details 424 is saved only as a secondary inconclusive result; it
+# is not the event trigger.
 #
 # Run:
 #
@@ -463,12 +499,16 @@ Accept: application/json
 #   --grace-period-ends-at "<approved-ISO-8601-deadline>"
 #
 # Replace the angle-bracket placeholder with a real timestamp that includes a
-# timezone. Do not run the command with the placeholder text. If no waiting
-# policy is approved yet, omit --grace-period-ends-at and remain pending.
+# timezone. Do not run the command with the placeholder text.
+#
+# For the simulation branch below, omit --grace-period-ends-at on this first
+# command. The mapping temporarily reports lifecycleReason=awaiting-healthy-sync
+# until configure-simulation-grace records the approved local deadline.
 #
 # This records:
 # - lifecycleStatus=pending;
-# - lifecycleReason=awaiting-grace-period;
+# - lifecycleReason=awaiting-grace-period when a real deadline was supplied,
+#   or awaiting-healthy-sync until the simulation deadline is configured;
 # - providerSource.reason=provider-presence-unconfirmed; and
 # - registrySyncPackage.reason=not-observed-in-complete-inventory.
 #
@@ -481,7 +521,8 @@ Accept: application/json
 ###############################################################################
 # CURRENT CHECKPOINT - STOP HERE until gracePeriodEndsAt
 #
-# Immediately after source-missing, confirm only:
+# After source-missing and, for a simulation, configure-simulation-grace,
+# confirm only:
 # - lifecycleStatus is pending;
 # - lifecycleReason is awaiting-grace-period;
 # - providerSource is pending with reason provider-presence-unconfirmed;
@@ -498,7 +539,7 @@ Accept: application/json
 #
 # The production candidate remains 14 days. To complete this disposable
 # lifecycle experiment today without pretending that 14 days passed, an
-# explicitly approved simulation may use a real 15-minute interval that has
+# explicitly approved simulation may use a real 5-minute interval that has
 # already elapsed since missingSince.
 #
 # Do not edit mapping.json manually and do not provide a future --at value.
@@ -508,18 +549,18 @@ Accept: application/json
 #   --mapping evidence/demos/03-delete-companion/mapping.json `
 #   --output evidence/demos/03-delete-companion/mapping.json `
 #   event configure-simulation-grace `
-#   --simulation-grace-minutes 15 `
+#   --simulation-grace-minutes 5 `
 #   --production-candidate-grace-period P14D `
 #   --reason validate-disposable-delete-lifecycle
 #
 # Confirm:
 # - retirementPolicy.mode is experiment-simulation;
-# - retirementPolicy.gracePeriod is PT15M;
+# - retirementPolicy.gracePeriod is PT5M;
 # - retirementPolicy.productionCandidateGracePeriod is P14D; and
 # - gracePeriodEndsAt equals missingSince plus 15 real minutes.
 #
 # This simulation validates lifecycle mechanics only. It does not validate
-# that 15 minutes or 14 days is the correct production waiting policy.
+# that 5 minutes or 14 days is the correct production waiting policy.
 
 ###############################################################################
 # Part 2.3 - Re-read complete inventory at the grace-period boundary
@@ -879,10 +920,12 @@ Accept: application/json
 # ../../evidence/demos/03-delete-companion/blueprint-principal-before-cleanup.json
 
 ###############################################################################
-# Part 5.3 - Completely enumerate Agent Identities for Blueprint membership
+# Part 5.3 - List Agent Identities belonging to the mapped Blueprint
 #
-# Expected: 200. Read every page. Match agentIdentityBlueprintId to the locked
-# Blueprint appId. Do not use a cached count or only the local source mapping.
+# Expected: 200. The server-side filter uses the locked Blueprint appId.
+# Read every returned page and verify every result's agentIdentityBlueprintId
+# still equals that appId. Do not use a cached count or only the local source
+# mapping.
 #
 # Before sending this request, acquire the Blueprint-group onboarding exclusion
 # across every writer and restore path. If that exclusion cannot prevent a new
@@ -891,7 +934,7 @@ Accept: application/json
 # unresolved operation must remain represented as a reservation.
 
 # @name deleteListBlueprintAgentIdentities
-GET {{graphBaseUrl}}/v1.0/servicePrincipals/microsoft.graph.agentIdentity?$select=id,agentIdentityBlueprintId
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/microsoft.graph.agentIdentity?$filter=agentIdentityBlueprintId%20eq%20'{{blueprintAppId}}'&$select=id,agentIdentityBlueprintId
 Authorization: Bearer {{deleteToken.response.body.$.access_token}}
 Accept: application/json
 
@@ -925,6 +968,13 @@ Accept: application/json
 #
 # The reconciler now records the number of other active or pending Agent
 # Identities and pending creation reservations assigned to this Blueprint.
+# In production, the reconciler calculates both counts automatically from the
+# complete filtered API response and the mapping/operation journal. It also
+# supplies the enumeration-complete and onboarding-exclusion-held assertions.
+# None of these values is a human approval gate.
+#
+# This manual experiment passes the saved evidence values as CLI arguments
+# because the local prototype does not call Graph or the operation journal.
 # Replace all angle-bracket values with the verified local evidence values:
 #
 # python demos/03-delete-companion/prototype_retirement_mapping.py `
@@ -1057,6 +1107,18 @@ Accept: application/json
 #
 # Expected eventually: 404.
 #
+# The observed Graph 404 may use the generic message:
+#
+# "Resource '' does not exist or one of its queried reference-property
+# objects are not present."
+#
+# The empty quotes are an unpopulated resource label in Graph's
+# alternate-key/type-cast error template; they do not by themselves mean that
+# blueprintAppId was empty. Treat this as the expected absence result only
+# when the HTTP status is 404, the error code is Request_ResourceNotFound,
+# blueprintAppId is still populated, and the same locked appId resolved the
+# principal successfully before Blueprint deletion.
+#
 # A 200 means cascade cleanup has not completed. Save the observation, leave
 # blueprintPrincipal.status=pending, wait, and repeat this GET. Do not send a
 # separate principal DELETE merely to make the experiment complete.
@@ -1095,6 +1157,14 @@ Accept: application/json
 # Expected: 200. Read every page and confirm that neither the provider source
 # key nor companion source ID is present. This does not prove permanent purge
 # of any soft-deleted Entra object.
+#
+# This request uses deleteToken because that token includes
+# CopilotPackages.Read.All. The newer Blueprint cleanup token is intentionally
+# narrower and is not used for Package inventory. If Graph returns
+# InvalidAuthenticationToken with "Lifetime validation failed, the token is
+# expired", rerun Authentication 1 and Authentication 2 to refresh
+# deleteToken, then resend only Part 6. Token refresh is not another retirement
+# approval and does not repeat any DELETE operation.
 
 # @name deleteListPackagesFinal
 GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages

@@ -1036,20 +1036,20 @@ class RetirementMappingPrototypeTests(unittest.TestCase):
             missing,
             "configure-simulation-grace",
             "2026-09-12T17:40:00+00:00",
-            simulation_grace_minutes=15,
+            simulation_grace_minutes=5,
             production_candidate_grace_period="P14D",
             reason="validate-disposable-delete-lifecycle",
         )
 
         self.assertEqual(
             configured["retirement"]["gracePeriodEndsAt"],
-            "2026-09-12T17:31:00+00:00",
+            "2026-09-12T17:21:00+00:00",
         )
         self.assertEqual(
             configured["retirementPolicy"],
             {
                 "mode": "experiment-simulation",
-                "gracePeriod": "PT15M",
+                "gracePeriod": "PT5M",
                 "productionCandidateGracePeriod": "P14D",
                 "reason": "validate-disposable-delete-lifecycle",
                 "configuredAt": "2026-09-12T17:40:00+00:00",
@@ -1070,7 +1070,7 @@ class RetirementMappingPrototypeTests(unittest.TestCase):
             missing,
             "configure-simulation-grace",
             "2026-09-12T17:40:00+00:00",
-            simulation_grace_minutes=15,
+            simulation_grace_minutes=5,
             production_candidate_grace_period="P14D",
             reason="validate-disposable-delete-lifecycle",
         )

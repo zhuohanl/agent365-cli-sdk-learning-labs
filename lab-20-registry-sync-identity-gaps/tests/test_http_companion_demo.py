@@ -1139,6 +1139,14 @@ class HttpCompanionDeleteDemoTests(unittest.TestCase):
         self.assertNotIn("event registration-retirement-approved", self.text)
         self.assertNotIn("event identity-retirement-approved", self.text)
 
+    def test_blueprint_membership_uses_server_side_filter(self):
+        request = self.blocks["deleteListBlueprintAgentIdentities"]
+        self.assertIn(
+            "$filter=agentIdentityBlueprintId%20eq%20'{{blueprintAppId}}'",
+            request,
+        )
+        self.assertIn("$select=id,agentIdentityBlueprintId", request)
+
     def test_graph_requests_use_explicit_delete_token(self):
         for name, block in self.blocks.items():
             if name in {
