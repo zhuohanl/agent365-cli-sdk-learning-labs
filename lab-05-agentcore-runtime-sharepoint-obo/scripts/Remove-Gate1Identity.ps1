@@ -109,7 +109,7 @@ foreach ($object in $objects) {
         -AllowNotFound
     if ($live) {
         if (
-            $object.ExpectedName -and
+            $object.ContainsKey('ExpectedName') -and
             [string]$live.displayName -ne [string]$object.ExpectedName
         ) {
             throw "The live $($object.Key) name does not match issue-206 ownership."
