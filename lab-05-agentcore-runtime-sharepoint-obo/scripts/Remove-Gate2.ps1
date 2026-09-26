@@ -251,63 +251,79 @@ if ($gate2['ficId']) {
     Save-ExperimentState -Path $statePath -State $state
 }
 
-$graphServicePrincipal = Invoke-BoundedGraph `
-    -Method GET `
-    -Uri (
-        "https://graph.microsoft.com/v1.0/servicePrincipals" +
-        "(appId='00000003-0000-0000-c000-000000000000')" +
-        '?$select=id,appRoles'
-    ) `
-    -TimeoutSeconds 60 `
-    -ExpectedStatus @(200)
-$managedIdentityId = [string]$gate2['managedIdentityPrincipalId']
-$assignmentsUri = (
-    "https://graph.microsoft.com/v1.0/servicePrincipals/$managedIdentityId" +
-    '/appRoleAssignments'
+$appRoleSpecs = @(
+    @{
+        Key = 'gate4LabelV1ManagedIdentityAppRoleConfigured'
+        Value = 'SensitivityLabel.Read'
+    },
+    @{
+        Key = 'gate4LabelManagedIdentityAppRoleConfigured'
+        Value = 'InformationProtectionPolicy.Read.All'
+    }
 )
-$assignments = Invoke-BoundedGraph `
-    -Method GET `
-    -Uri $assignmentsUri `
-    -TimeoutSeconds 60 `
-    -ExpectedStatus @(200)
-foreach ($roleValue in @(
-        'SensitivityLabel.Read',
-        'InformationProtectionPolicy.Read.All'
-    )) {
-    $role = @(
-        $graphServicePrincipal.appRoles |
-            Where-Object { $_.value -eq $roleValue }
-    )
-    if ($role.Count -ne 1) {
-        throw "The Graph $roleValue role could not be resolved."
+$pendingAppRoles = @(
+    $appRoleSpecs |
+        Where-Object { $gate2.ContainsKey($_.Key) }
+)
+if ($pendingAppRoles.Count -gt 0) {
+    $managedIdentityId = [string]$gate2['managedIdentityPrincipalId']
+    if (-not $managedIdentityId) {
+        throw 'Managed identity state is missing before Graph app-role cleanup.'
     }
-    $matches = @(
-        $assignments.value |
-            Where-Object {
-                [string]$_.principalId -eq $managedIdentityId -and
-                [string]$_.resourceId -eq [string]$graphServicePrincipal.id -and
-                [string]$_.appRoleId -eq [string]$role[0].id
-            }
+    $graphServicePrincipal = Invoke-BoundedGraph `
+        -Method GET `
+        -Uri (
+            "https://graph.microsoft.com/v1.0/servicePrincipals" +
+            "(appId='00000003-0000-0000-c000-000000000000')" +
+            '?$select=id,appRoles'
+        ) `
+        -TimeoutSeconds 60 `
+        -ExpectedStatus @(200)
+    $assignmentsUri = (
+        "https://graph.microsoft.com/v1.0/servicePrincipals/$managedIdentityId" +
+        '/appRoleAssignments'
     )
-    if ($matches.Count -gt 1) {
-        throw "The Graph $roleValue assignment is duplicated."
-    }
-    if ($matches.Count -eq 1) {
-        $assignmentUri = (
-            "https://graph.microsoft.com/v1.0/servicePrincipals/" +
-            "$managedIdentityId/appRoleAssignments/$($matches[0].id)"
+    $assignments = Invoke-BoundedGraph `
+        -Method GET `
+        -Uri $assignmentsUri `
+        -TimeoutSeconds 60 `
+        -ExpectedStatus @(200)
+    foreach ($roleSpec in $pendingAppRoles) {
+        $role = @(
+            $graphServicePrincipal.appRoles |
+                Where-Object { $_.value -eq $roleSpec.Value }
         )
-        $null = Invoke-BoundedGraph `
-            -Method DELETE `
-            -Uri $assignmentUri `
-            -TimeoutSeconds 60 `
-            -ExpectedStatus @(204)
-        Assert-GraphAbsent -Uri $assignmentUri
+        if ($role.Count -ne 1) {
+            throw "The Graph $($roleSpec.Value) role could not be resolved."
+        }
+        $matches = @(
+            $assignments.value |
+                Where-Object {
+                    [string]$_.principalId -eq $managedIdentityId -and
+                    [string]$_.resourceId -eq
+                        [string]$graphServicePrincipal.id -and
+                    [string]$_.appRoleId -eq [string]$role[0].id
+                }
+        )
+        if ($matches.Count -gt 1) {
+            throw "The Graph $($roleSpec.Value) assignment is duplicated."
+        }
+        if ($matches.Count -eq 1) {
+            $assignmentUri = (
+                "https://graph.microsoft.com/v1.0/servicePrincipals/" +
+                "$managedIdentityId/appRoleAssignments/$($matches[0].id)"
+            )
+            $null = Invoke-BoundedGraph `
+                -Method DELETE `
+                -Uri $assignmentUri `
+                -TimeoutSeconds 60 `
+                -ExpectedStatus @(204)
+            Assert-GraphAbsent -Uri $assignmentUri
+        }
+        $gate2.Remove($roleSpec.Key)
+        Save-ExperimentState -Path $statePath -State $state
     }
 }
-$gate2.Remove('gate4LabelManagedIdentityAppRoleConfigured')
-$gate2.Remove('gate4LabelV1ManagedIdentityAppRoleConfigured')
-Save-ExperimentState -Path $statePath -State $state
 
 $containerApp = Invoke-BoundedAz `
     -Arguments @(

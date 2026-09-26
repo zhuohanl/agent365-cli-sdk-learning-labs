@@ -17,6 +17,7 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     assert "Stop-RuntimeSessions.ps1" in gate2
     assert "Stop-RuntimeSessions.ps1" in gate1_aws
     assert '"$blueprintUri?' not in gate2
+    assert "if ($pendingAppRoles.Count -gt 0)" in gate2
 
 
 def load_stop_module() -> ModuleType:
