@@ -1,0 +1,3 @@
+interface:
+  display_name: "Rubber Duck Review Loop"
+  short_description: "Iterate document review and fixes to clearance"

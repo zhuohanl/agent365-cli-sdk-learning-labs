@@ -1,0 +1,545 @@
+# Lab 20 Experiment 3A: Create an opaque-source companion with a365 setup all
+#
+# Question:
+# Can the supported Agent 365 CLI create one complete dedicated companion
+# stack for an existing Registry Sync source while:
+# - leaving the original Registry Sync Package unchanged;
+# - accepting the CLI-generated Registration sourceAgentId without rewriting
+#   it to the DD-002 companion naming convention; and
+# - preserving the provider-to-companion relationship only in durable mapping?
+#
+# This can run as a paired comparison against Experiment 03 using the same
+# approved disposable GCP source. In that mode, the existing deterministic
+# companion must be fully created, readable, and mapped, with no unresolved
+# write. Experiment 3A deliberately creates a second companion temporarily so
+# their source IDs, identity stacks, permissions, and Package representations
+# can be compared.
+#
+# This paired mode is experiment-only. It temporarily violates the normal
+# one-active-companion-per-scoped-source invariant and must not be treated as a
+# committed-fleet lifecycle design.
+#
+# Observed verdict:
+# The CLI-created Registration had no originatingStore and its Package
+# platform was `Not Available`. Because committed-fleet must identify and
+# filter companion Registrations by third-party platform, this provisioning
+# path is rejected for implementation use.
+#
+# The only remote write in this experiment is:
+#
+# a365 setup all --agent-name <synthetic-name> --tenant-id <tenant-id> --authmode obo
+#
+# Do not send a Graph POST, PATCH, or DELETE from this file. Do not modify the
+# sourceAgentId returned by the CLI.
+#
+# Installed CLI baseline used when this file was written:
+# a365 1.1.214+90c444832f
+#
+# Recheck `a365 --version` and `a365 setup all --help` before running.
+#
+# Add these values to the shared ignored ../../.env:
+#
+# A365_EXP3A_TARGET_NAME=<exact-selected-package-display-name>
+# A365_EXP3A_PACKAGE_ID=<original-registry-sync-package-id>
+# A365_EXP3A_PROVIDER_SOURCE_AGENT_ID=<exact-provider-source-agent-id>
+# A365_EXP3A_CLI_AGENT_NAME=<unique-synthetic-cli-agent-name>
+# A365_EXP3A_BLUEPRINT_OBJECT_ID=<leave-empty-until-CLI-success>
+# A365_EXP3A_BLUEPRINT_APP_ID=<leave-empty-until-CLI-success>
+# A365_EXP3A_BLUEPRINT_PRINCIPAL_ID=<leave-empty-until-CLI-success>
+# A365_EXP3A_AGENT_IDENTITY_ID=<leave-empty-until-CLI-success>
+# A365_EXP3A_CLI_SOURCE_AGENT_ID=<leave-empty-until-registration-readback>
+# A365_EXP3A_REGISTRATION_ID=<leave-empty-until-CLI-success>
+# A365_EXP3A_COMPANION_PACKAGE_ID=<leave-empty-until-Package-list-readback>
+#
+# Evidence belongs only under:
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/
+#
+# All saved results must be JSON. Never save authentication responses, access
+# tokens, generated credentials, raw CLI setup output, or a generated CLI
+# configuration containing credentials.
+#
+# Run one request or CLI command at a time. Never use "Send All".
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@targetName = {{$dotenv A365_EXP3A_TARGET_NAME}}
+@packageId = {{$dotenv A365_EXP3A_PACKAGE_ID}}
+@providerSourceAgentId = {{$dotenv A365_EXP3A_PROVIDER_SOURCE_AGENT_ID}}
+@blueprintObjectId = {{$dotenv A365_EXP3A_BLUEPRINT_OBJECT_ID}}
+@blueprintAppId = {{$dotenv A365_EXP3A_BLUEPRINT_APP_ID}}
+@blueprintPrincipalId = {{$dotenv A365_EXP3A_BLUEPRINT_PRINCIPAL_ID}}
+@agentIdentityId = {{$dotenv A365_EXP3A_AGENT_IDENTITY_ID}}
+@cliSourceAgentId = {{$dotenv A365_EXP3A_CLI_SOURCE_AGENT_ID}}
+@registrationId = {{$dotenv A365_EXP3A_REGISTRATION_ID}}
+@companionPackageId = {{$dotenv A365_EXP3A_COMPANION_PACKAGE_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@readScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20offline_access
+
+###############################################################################
+# Step 3A.1 - Authenticate for read-only Graph observations
+#
+# DO NOT SAVE either authentication response or the /me response.
+
+# @name exp3aDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{readScopes}}
+
+###
+
+# Complete browser sign-in before sending this request.
+
+# @name exp3aToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{exp3aDeviceCode.response.body.$.device_code}}
+
+###
+
+# @name exp3aCurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.2 - Capture complete Package inventory before CLI setup
+#
+# Expected: 200. Save the first page as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/package-list-before-page-1.json
+#
+# Follow every @odata.nextLink and save page-2.json, page-3.json, and so on
+# until the latest page has no next link.
+#
+# Select exactly one approved disposable GoogleVertexAI Package. It may be the
+# same source used by Experiment 03 only when that experiment's deterministic
+# companion is fully verified and retained as the paired comparison control.
+# Copy the original Registry Sync Package's exact displayName and Package ID
+# into A365_EXP3A_TARGET_NAME and A365_EXP3A_PACKAGE_ID.
+
+# @name exp3aListPackagesBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.3 - Capture the selected original Registry Sync Package
+#
+# Expected: 200. Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/original-package-before.json
+#
+# Confirm:
+# - id and displayName match Step 3A.2;
+# - platform is GoogleVertexAI;
+# - agentIdentityId is absent or null; and
+# - the nested Connected Platform definition contains the exact provider
+#   SourceAgentId.
+#
+# Copy that exact value byte-for-byte into
+# A365_EXP3A_PROVIDER_SOURCE_AGENT_ID. It is the durable mapping key, not the
+# sourceAgentId that the CLI will create.
+
+# @name exp3aOriginalPackageBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.4 - Choose one unique synthetic CLI agent name
+#
+# Set A365_EXP3A_CLI_AGENT_NAME to a unique synthetic value. Do not use the
+# provider source ID, Package ID, tenant ID, project ID, or another real
+# identifier in the name.
+#
+# The name is not the authoritative relationship. The protected mapping is.
+# Do not select an existing CLI agent merely because its display name matches.
+
+###############################################################################
+# Step 3A.5 - Inspect the installed CLI and preview the complete setup
+#
+# From the Lab 20 root, use a fresh PowerShell process. Create an isolated
+# ignored workspace first because setup writes project settings:
+#
+# $labRoot = (Get-Location).Path
+# $workspace = Join-Path $labRoot 'evidence\experiments\03a-cli-setup-all-companion-create\cli-workspace'
+# New-Item -ItemType Directory -Force -Path $workspace | Out-Null
+# Set-Location $workspace
+# $agentName = Read-Host 'Enter A365_EXP3A_CLI_AGENT_NAME'
+# $tenantId = Read-Host 'Enter A365_TENANT_ID'
+# a365 --version
+# a365 setup all --help
+# a365 setup all --agent-name $agentName --tenant-id $tenantId --authmode obo --dry-run
+#
+# The dry run must plan one Blueprint, one Blueprint principal, permissions,
+# one Agent Identity, and one Agent Registration. Current CLI versions can
+# additionally plan a client secret, federated identity credential, managed
+# identity, default Observability and Power Platform permissions, and a local
+# appsettings.json write. Experiment 3A evaluates the complete supported CLI
+# bundle, so record these expected companion effects rather than rejecting the
+# Registration path merely because setup is not minimal.
+#
+# Stop if it plans an M365 messaging endpoint, a second Agent Identity, another
+# existing agent's objects, or an effect outside the displayed full-setup
+# bundle. Continue only with disposable objects and an isolated local
+# workspace.
+#
+# Do not save raw CLI output. Save a manually redacted JSON summary as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-dry-run.json
+#
+# Use this shape:
+#
+# {
+#   "step": "cli-dry-run",
+#   "observedAt": "<UTC-timestamp>",
+#   "cliVersion": "<version>",
+#   "exitCode": 0,
+#   "outcome": "supported",
+#   "plannedResourceClasses": [
+#     "agent-identity-blueprint",
+#     "blueprint-principal",
+#     "client-secret",
+#     "federated-identity-credential",
+#     "managed-identity",
+#     "permissions",
+#     "agent-identity",
+#     "agent-registration",
+#     "local-project-settings"
+#   ],
+#   "unexpectedResourceClasses": [],
+#   "safeNotes": "<non-identifying-summary>"
+# }
+
+###############################################################################
+# Stop 3A-A - approve exactly one CLI full setup
+#
+# Continue only when:
+# - the original Package and exact provider source were captured;
+# - protected mapping proves either:
+#   - no companion exists; or
+#   - exactly one verified Experiment 03 deterministic companion is the
+#     explicit paired comparison control;
+# - no companion create or cleanup has an unresolved outcome;
+# - the synthetic CLI name is unique;
+# - the operator accepts the displayed complete CLI bundle, including the
+#   managed identity, FIC, client secret, local settings, and default
+#   permission configuration;
+# - the intended auth mode and permission behavior are recorded;
+# - any required administrator action is understood; and
+# - one `a365 setup all` attempt is explicitly authorized.
+#
+# A previous timeout, process interruption, unknown exit, or partial result is
+# not permission to run setup again. Reconcile CLI state and Graph objects
+# first.
+
+###############################################################################
+# Step 3A.6 - Run a365 setup all without customizing sourceAgentId
+#
+# DO NOT RUN until Stop 3A-A is satisfied.
+#
+# Reuse the same PowerShell variables and isolated workspace from Step 3A.5:
+#
+# a365 setup all --agent-name $agentName --tenant-id $tenantId --authmode obo
+#
+# Do not pass --m365. Do not use --agent-registration-only. Do not patch or
+# replace the sourceAgentId selected by the CLI.
+#
+# Do not redirect or save raw setup output because it can contain generated
+# credential material. Store generated credentials only in an approved secret
+# store. Keep generated CLI configuration private and untracked.
+#
+# Save only a redacted JSON status summary as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-setup-result.json
+#
+# {
+#   "step": "cli-setup-all",
+#   "observedAt": "<UTC-timestamp>",
+#   "exitCode": 0,
+#   "outcome": "supported",
+#   "createdOrResolved": {
+#     "blueprint": true,
+#     "blueprintPrincipal": true,
+#     "permissions": true,
+#     "agentIdentity": true,
+#     "agentRegistration": true
+#   },
+#   "adminActionRequired": false,
+#   "safeNotes": "<non-identifying-summary>"
+# }
+#
+# If setup reports partial completion or administrator action, record that
+# exact class instead of marking the stack complete.
+
+###############################################################################
+# Step 3A.7 - Query CLI permission and inheritance state
+#
+# Run each command from the same private CLI context:
+#
+# a365 query-entra blueprint-scopes --agent-name $agentName --tenant-id $tenantId
+# a365 query-entra inheritance --agent-name $agentName --tenant-id $tenantId
+# a365 query-entra instance-scopes --agent-name $agentName --tenant-id $tenantId
+#
+# Save each result as a JSON envelope containing the command, exit code,
+# outcome class, and redacted output lines:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-blueprint-scopes.json
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-inheritance.json
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-instance-scopes.json
+#
+# Never record a client secret, token, tenant value, or raw generated config in
+# those files.
+
+###############################################################################
+# Step 3A.8 - Recover the CLI-created object IDs
+#
+# Inspect only the CLI-generated private state and the successful setup
+# summary. The CLI summary labels the Blueprint application object ID as
+# `Blueprint ID`; it does not label separate object-ID and app-ID values.
+#
+# First copy the exact values that the CLI displayed into the ignored .env:
+#
+# A365_EXP3A_BLUEPRINT_OBJECT_ID
+# A365_EXP3A_BLUEPRINT_PRINCIPAL_ID
+# A365_EXP3A_AGENT_IDENTITY_ID
+# A365_EXP3A_REGISTRATION_ID
+#
+# Leave A365_EXP3A_BLUEPRINT_APP_ID empty until Step 3A.9. The fields have
+# different meanings even when their returned values happen to be equal.
+#
+# Do not infer an ID from a display name. If the CLI does not expose one of the
+# first four identifiers, record that field as unavailable and do not guess.
+#
+# The observed CLI-created Registration ID is a GUID and can be used directly
+# as a URL path segment. No separate path-encoding variable is required.
+# Reload REST Client after updating .env.
+
+###############################################################################
+# Step 3A.9 - Verify the CLI-created Blueprint
+#
+# Expected: 200. Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/blueprint-after-cli.json
+#
+# The response contains both:
+# - id: must equal A365_EXP3A_BLUEPRINT_OBJECT_ID; and
+# - appId: copy this exact value into A365_EXP3A_BLUEPRINT_APP_ID.
+#
+# In the CLI 1.1.221 observation, `id`, `appId`, and the CLI summary's
+# Blueprint ID were equal. Record both fields independently instead of assuming
+# that every Blueprint creation path or future CLI version preserves equality.
+#
+# Save .env and reload REST Client before Step 3A.10.
+
+# @name exp3aGetBlueprint
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.10 - Verify the CLI-created Blueprint principal
+#
+# Expected: 200. Confirm its id equals A365_EXP3A_BLUEPRINT_PRINCIPAL_ID and
+# accountEnabled is not false. Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/blueprint-principal-after-cli.json
+
+# @name exp3aGetBlueprintPrincipal
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.11 - Verify the CLI-created Agent Identity
+#
+# Expected: 200. Confirm agentIdentityBlueprintId equals
+# A365_EXP3A_BLUEPRINT_APP_ID. Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/agent-identity-after-cli.json
+
+# @name exp3aGetAgentIdentity
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.12 - Verify the CLI-created Registration
+#
+# Expected: 200. Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/registration-after-cli.json
+#
+# Copy the returned sourceAgentId exactly into
+# A365_EXP3A_CLI_SOURCE_AGENT_ID. Do not rewrite it.
+#
+# Record whether it equals:
+# - the Agent Identity object ID;
+# - the Blueprint app ID;
+# - the original provider SourceAgentId; or
+# - another value.
+#
+# The expected experiment distinction is that this value does not use the
+# DD-002 agent-governance companion namespace.
+
+# @name exp3aGetRegistration
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{registrationId}}
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# Step 3A.13 - List Packages after CLI setup
+#
+# Expected: 200. Save every page, starting with:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/package-list-after-page-1.json
+#
+# Identify independently:
+#
+# 1. Original Registry Sync Package:
+#    - id equals A365_EXP3A_PACKAGE_ID;
+#    - platform is GoogleVertexAI; and
+#    - nested source equals A365_EXP3A_PROVIDER_SOURCE_AGENT_ID.
+#
+# 2. Existing Experiment 03 deterministic companion Package, when paired mode
+#    is used:
+#    - its source uses the recorded DD-002 companion namespace;
+#    - its Blueprint, Agent Identity, Registration, and Package IDs match the
+#      Experiment 03 mapping; and
+#    - it remains unchanged by the CLI setup.
+#
+# 3. CLI-created companion Package:
+#    - nested source equals A365_EXP3A_CLI_SOURCE_AGENT_ID;
+#    - Blueprint and Agent Identity links match the CLI-created objects; and
+#    - it is not selected by display name alone.
+#
+# Put its Package ID into A365_EXP3A_COMPANION_PACKAGE_ID. If no unambiguous
+# companion Package is visible, record unavailable or inconclusive and do not
+# run setup again.
+
+# @name exp3aListPackagesAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.14 - Confirm the original Registry Sync Package is unchanged
+#
+# Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/original-package-after.json
+#
+# Before sending, confirm `A365_EXP3A_PACKAGE_ID` exactly equals the `id` saved
+# in `original-package-before.json` and that Step 3A.13 contains that ID
+# exactly once. If either check fails, do not send this request. Reconcile the
+# ignored .env from the saved baseline first.
+#
+# Expected success is 200. Only after the request target has passed those
+# checks may a 424 whose safe error class says that Title Preview could not be
+# found be classified as `inconclusive-dependency-failure`.
+#
+# A saved 424 from an ID that differs from the baseline is an invalid
+# observation, not evidence about the original Package. Correct the local ID
+# and retry this read once. Do not rerun `a365 setup all`.
+
+# @name exp3aOriginalPackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.15 - Read the CLI-created companion Package
+#
+# Save as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/companion-package-after.json
+
+# @name exp3aCompanionPackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{companionPackageId}}
+Authorization: Bearer {{exp3aToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 3A.16 - Save the durable mapping
+#
+# Save one protected JSON mapping as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/mapping.json
+#
+# It must contain:
+# - the complete scoped provider source key;
+# - original Package ID;
+# - synthetic CLI agent name;
+# - exact CLI-generated sourceAgentId;
+# - Registration ID;
+# - companion Package ID;
+# - Blueprint object ID and app ID;
+# - Blueprint principal ID;
+# - Agent Identity ID;
+# - permission and consent status;
+# - CLI version and auth mode;
+# - setup start/completion timestamps;
+# - status and any unresolved operation; and
+# - last verification timestamp.
+#
+# In paired mode, also record the existing Experiment 03 companion source,
+# Registration, Package, Blueprint, and Agent Identity IDs under a separate
+# `comparisonControl` object. Mark the 03A mapping `comparison-only`; do not
+# replace the normal active mapping for the scoped provider source.
+#
+# The mapping, not the CLI name or Registration sourceAgentId, is the
+# authoritative relationship between the Registry Sync source and this
+# companion.
+
+###############################################################################
+# Cleanup - optional only after all observations are complete
+#
+# Do not clean up if this CLI-created companion will be used by a separately
+# approved rename, runtime, activity, or lifecycle experiment.
+#
+# First preview cleanup:
+#
+# a365 cleanup --agent-name $agentName --tenant-id $tenantId --dry-run
+#
+# Save a redacted JSON plan as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-cleanup-dry-run.json
+#
+# Proceed only after the plan identifies exactly this experiment's CLI-created
+# objects and cleanup is separately approved. In paired mode it must not
+# include the Experiment 03 control Blueprint, Identity, or Registration:
+#
+# a365 cleanup --agent-name $agentName --tenant-id $tenantId
+#
+# Save a redacted JSON result as:
+#
+# ../../evidence/experiments/03a-cli-setup-all-companion-create/cli-cleanup-result.json
+#
+# Then repeat Steps 3A.9 through 3A.15 as read-only cleanup verification. In
+# paired mode, require the Experiment 03 control companion to remain readable
+# and unchanged while the CLI-created companion is removed. Do not assume CLI
+# exit code 0 proves Registration or Package disappearance. Preserve the 03A
+# comparison mapping as a tombstone even after successful cleanup.

@@ -1,0 +1,203 @@
+# Lab 20 Experiment 6: Resolve a Package Agent Identity to its Blueprint
+#
+# Given one Agent 365 Package ID, this read-only experiment resolves:
+#
+# Package
+# -> agentIdentityId
+# -> Agent Identity
+# -> agentIdentityBlueprintId
+# -> tenant-local Blueprint principal
+#
+# Run one request at a time. Never use "Send All".
+#
+# Add this value to the shared ignored ../../.env file:
+#
+# A365_BLUEPRINT_LOOKUP_PACKAGE_ID=<exact-package-id>
+#
+# The public-client application also needs these approved delegated Microsoft
+# Graph permissions with admin consent:
+#
+# - CopilotPackages.Read.All
+# - AgentIdentity.Read.All
+# - AgentIdentityBlueprintPrincipal.Read.All
+#
+# This experiment performs no writes. Do not save authentication responses.
+# Save any required Package, Agent Identity, or Blueprint response only under:
+#
+# ../../evidence/experiments/06-package-blueprint-lookup/
+#
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@packageId = {{$dotenv A365_BLUEPRINT_LOOKUP_PACKAGE_ID}}
+@graphBaseUrl = https://graph.microsoft.com
+@lookupScopes = https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20offline_access
+
+###############################################################################
+# Step 1 - Start delegated device-code authentication
+#
+# Expected: HTTP 200 with user_code, device_code, and verification_uri.
+# Complete browser sign-in before running Step 2.
+# Never save this response.
+
+# @name blueprintLookupStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+client_id={{clientId}}&scope={{lookupScopes}}
+
+###
+
+###############################################################################
+# Step 2 - Exchange the device code for a Graph access token
+#
+# Expected after browser sign-in: HTTP 200 with access_token.
+# If Graph returns authorization_pending, finish sign-in, wait for the interval
+# from Step 1, and run this request again.
+# Never save this response.
+
+# @name blueprintLookupToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+Accept: application/json
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{blueprintLookupStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Step 3 - Read the selected Package
+#
+# Expected: HTTP 200 with the exact Package selected through .env.
+#
+# Inspect:
+# - id
+# - displayName
+# - platform
+# - agentIdentityId
+#
+# STOP if agentIdentityId is absent, null, or empty. That Package does not
+# provide an Agent Identity ID that this experiment can resolve.
+#
+# Save the response as:
+# ../../evidence/experiments/06-package-blueprint-lookup/package.json
+
+# @name blueprintLookupPackage
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{packageId}}?$select=id,displayName,platform,agentIdentityId
+Authorization: Bearer {{blueprintLookupToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 4A - Try agentIdentityId as the Agent Identity object ID
+#
+# The URL uses agentIdentityId directly from the Step 3 response.
+#
+# Expected: HTTP 200 with:
+# - id: Agent Identity object ID
+# - displayName: Agent Identity display name
+# - agentIdentityBlueprintId: parent Blueprint application ID (appId)
+#
+# This is the documented Agent Identity GET shape. If it returns
+# Request_ResourceNotFound, continue to Step 4B because the public Package
+# documentation does not define the semantics of its observed agentIdentityId
+# field.
+#
+# Save the response or safe error body as:
+# ../../evidence/experiments/06-package-blueprint-lookup/agent-identity-by-object-id.json
+
+# @name blueprintLookupAgentIdentityByObjectId
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{blueprintLookupPackage.response.body.$.agentIdentityId}}/microsoft.graph.agentIdentity?$select=id,appId,displayName,servicePrincipalType,accountEnabled,agentIdentityBlueprintId
+Authorization: Bearer {{blueprintLookupToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 4B - If Step 4A returned 404, try agentIdentityId as appId
+#
+# Microsoft Graph supports addressing a service principal by appId through an
+# alternate key. Run this request only when Step 4A returned
+# Request_ResourceNotFound.
+#
+# If this request succeeds:
+# - confirm response appId equals the Package agentIdentityId;
+# - use this response for Step 5B; and
+# - record that the Package field behaved as appId rather than object ID.
+#
+# If both Step 4A and Step 4B return Request_ResourceNotFound, the Package
+# contains an Agent Identity reference that cannot currently be resolved.
+#
+# If sent, save the response or safe error body as:
+# ../../evidence/experiments/06-package-blueprint-lookup/agent-identity-by-app-id.json
+
+# @name blueprintLookupAgentIdentityByAppId
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintLookupPackage.response.body.$.agentIdentityId}}')/microsoft.graph.agentIdentity?$select=id,appId,displayName,servicePrincipalType,accountEnabled,agentIdentityBlueprintId
+Authorization: Bearer {{blueprintLookupToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 5A - Read the Blueprint principal after Step 4A succeeds
+#
+# agentIdentityBlueprintId from Step 4A is the parent Blueprint application
+# appId, not the Blueprint application object ID.
+#
+# Expected: HTTP 200 with:
+# - id: tenant-local Blueprint principal object ID
+# - appId: Blueprint application ID
+# - displayName: tenant-local Blueprint principal display name
+# - accountEnabled: principal state
+#
+# Confirm that appId exactly matches the Step 4A Agent Identity's
+# agentIdentityBlueprintId.
+#
+# If this branch is used, save the response as:
+# ../../evidence/experiments/06-package-blueprint-lookup/blueprint-principal-from-object-id.json
+
+# @name blueprintLookupPrincipalFromObjectId
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintLookupAgentIdentityByObjectId.response.body.$.agentIdentityBlueprintId}}')/microsoft.graph.agentIdentityBlueprintPrincipal?$select=id,appId,displayName,accountEnabled
+Authorization: Bearer {{blueprintLookupToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Step 5B - Read the Blueprint principal after Step 4B succeeds
+#
+# Run this branch only when Step 4A failed and Step 4B succeeded.
+#
+# If this branch is used, save the response as:
+# ../../evidence/experiments/06-package-blueprint-lookup/blueprint-principal-from-app-id.json
+
+# @name blueprintLookupPrincipalFromAppId
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintLookupAgentIdentityByAppId.response.body.$.agentIdentityBlueprintId}}')/microsoft.graph.agentIdentityBlueprintPrincipal?$select=id,appId,displayName,accountEnabled
+Authorization: Bearer {{blueprintLookupToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# Result
+#
+# The relationship is established only when all of these checks pass:
+#
+# 1. Step 3 Package id equals A365_BLUEPRINT_LOOKUP_PACKAGE_ID.
+# 2. For the Step 4A path, Agent Identity id equals Step 3 agentIdentityId.
+# 3. For the Step 4B path, Agent Identity appId equals Step 3 agentIdentityId.
+# 4. The selected Step 5 Blueprint principal appId equals the successful
+#    Agent Identity response's agentIdentityBlueprintId.
+#
+# Report these values separately:
+#
+# - Microsoft platform: Step 3 platform
+# - Package ID: Step 3 id
+# - Package agentIdentityId and whether it resolved as objectId or appId
+# - Agent Identity object ID: successful Step 4 response id
+# - Blueprint name: successful Step 5 response displayName
+# - Blueprint ID: successful Step 5 response appId
+# - Blueprint principal object ID: successful Step 5 response id
+#
+# Do not interpret the Blueprint principal object ID as the Blueprint ID.

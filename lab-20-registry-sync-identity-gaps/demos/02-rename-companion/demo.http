@@ -1,0 +1,692 @@
+# Lab 20: Companion registration rename experiment
+#
+# Question:
+# When an approved disposable GCP agent is renamed, does Registry Sync retain
+# the exact provider sourceAgentId, and can every in-scope Agent 365 display
+# name be synchronized without replacing any object or changing any ID?
+#
+# Run one request at a time. Never use "Send All".
+#
+# The evidence path is read-only:
+#   Part 1 -> manually rename the disposable GCP agent -> Part 2 -> Stop A
+#
+# Parts 3 through 6 are one-variable-at-a-time name synchronization writes.
+# Do not send them until Stop A confirms that the scoped provider source key
+# is unchanged. A changed sourceAgentId is not an in-place rename.
+#
+# Put all real values in the shared ignored ../../.env file:
+#
+# A365_TENANT_ID=<directory-tenant-id>
+# A365_CLIENT_ID=<public-client-application-id>
+# A365_DEMO_TARGET_NAME=<display-name-before-provider-rename>
+# A365_DEMO_ORIGINAL_PACKAGE_ID=<package-id-before-provider-rename>
+# A365_DEMO_PROVIDER_SOURCE_AGENT_ID=<exact-source-id-before-provider-rename>
+# A365_DEMO_ASSIGNMENT_MODE=<dedicated-or-shared>
+# A365_DEMO_BLUEPRINT_GROUP=<mapped-assignment-group>
+# A365_DEMO_BLUEPRINT_OBJECT_ID=<mapped-blueprint-object-id>
+# A365_DEMO_BLUEPRINT_APP_ID=<mapped-blueprint-app-id>
+# A365_DEMO_BLUEPRINT_PRINCIPAL_ID=<mapped-blueprint-principal-id>
+# A365_DEMO_AGENT_IDENTITY_ID=<existing-agent-identity-id>
+# A365_DEMO_COMPANION_SOURCE_AGENT_ID=<exact-mapped-companion-source-id>
+# A365_DEMO_COMPANION_REGISTRATION_ID=<existing-companion-registration-id>
+# A365_DEMO_COMPANION_REGISTRATION_ID_PATH=<path-safe-registration-id>
+# A365_DEMO_COMPANION_PACKAGE_ID=<existing-companion-package-id>
+# A365_RENAME_NEW_TARGET_NAME=<display-name-after-provider-rename>
+# A365_RENAME_AFTER_PACKAGE_ID=<package-id-observed-after-sync>
+# A365_RENAME_SOURCE_MODIFIED_AT=<exact-source-modified-timestamp-after-sync>
+#
+# Preserve the before and after sourceAgentId values byte-for-byte in ignored
+# evidence. Do not URL-decode, normalize, or put them in tracked files.
+#
+# Save private responses only under:
+# ../../evidence/demos/02-rename-companion/
+
+@tenantId = {{$dotenv A365_TENANT_ID}}
+@clientId = {{$dotenv A365_CLIENT_ID}}
+@oldTargetName = {{$dotenv A365_DEMO_TARGET_NAME}}
+@originalPackageId = {{$dotenv A365_DEMO_ORIGINAL_PACKAGE_ID}}
+@expectedSourceAgentId = {{$dotenv A365_DEMO_PROVIDER_SOURCE_AGENT_ID}}
+@assignmentMode = {{$dotenv A365_DEMO_ASSIGNMENT_MODE}}
+@blueprintGroup = {{$dotenv A365_DEMO_BLUEPRINT_GROUP}}
+@blueprintObjectId = {{$dotenv A365_DEMO_BLUEPRINT_OBJECT_ID}}
+@blueprintAppId = {{$dotenv A365_DEMO_BLUEPRINT_APP_ID}}
+@blueprintPrincipalId = {{$dotenv A365_DEMO_BLUEPRINT_PRINCIPAL_ID}}
+@agentIdentityId = {{$dotenv A365_DEMO_AGENT_IDENTITY_ID}}
+@companionSourceAgentId = {{$dotenv A365_DEMO_COMPANION_SOURCE_AGENT_ID}}
+@companionRegistrationId = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID}}
+@companionRegistrationIdPath = {{$dotenv A365_DEMO_COMPANION_REGISTRATION_ID_PATH}}
+@companionPackageId = {{$dotenv A365_DEMO_COMPANION_PACKAGE_ID}}
+@newTargetName = {{$dotenv A365_RENAME_NEW_TARGET_NAME}}
+@afterPackageId = {{$dotenv A365_RENAME_AFTER_PACKAGE_ID}}
+@newSourceModifiedAt = {{$dotenv A365_RENAME_SOURCE_MODIFIED_AT}}
+@graphBaseUrl = https://graph.microsoft.com
+@renameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FCopilotPackages.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprint.UpdateBranding.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentityBlueprintPrincipal.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentIdentity.ReadWrite.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.Read.All%20https%3A%2F%2Fgraph.microsoft.com%2FAgentRegistration.ReadWrite.All%20offline_access
+@principalRenameScopes = https%3A%2F%2Fgraph.microsoft.com%2FUser.Read%20https%3A%2F%2Fgraph.microsoft.com%2FApplication.ReadWrite.All%20offline_access
+
+###############################################################################
+# Authentication 1 - Request a device code
+#
+# Never save this response.
+
+# @name renameStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{renameScopes}}
+
+###
+
+###############################################################################
+# Authentication 2 - Exchange the device code after browser sign-in
+#
+# Never save this response.
+
+# @name renameToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{renameStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Part 1.1 - Confirm the signed-in operator
+#
+# Send after Authentication 2 succeeds. Expected: 200.
+# Keep the returned user ID private.
+
+# @name renameCurrentUser
+GET {{graphBaseUrl}}/v1.0/me?$select=id
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.1
+#
+# Do not save this response. The operator ID is used only by the live session.
+
+###############################################################################
+# Part 1.2 - Capture Package inventory before the provider rename
+#
+# Expected: 200. Read every returned page before continuing. Locate the
+# original Registry Sync Package by platform, provider scope, and exact nested
+# sourceAgentId rather than display name alone.
+
+# @name renameListPackagesBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.2
+#
+# 1. Save the first page:
+# ../../evidence/demos/02-rename-companion/package-list-before-provider-rename-page-1.json
+# 2. If @odata.nextLink exists, save every additional page as
+#    package-list-before-provider-rename-page-2.json, page-3.json, and so on.
+
+###############################################################################
+# Part 1.3 - Capture the original Package before the provider rename
+#
+# Expected: 200.
+# Record privately:
+# - Package ID
+# - displayName
+# - platform
+# - connection/provenance metadata
+# - exact nested provider sourceAgentId
+# - provider scope
+# - source-created and source-modified timestamps
+
+# @name renameGetPackageBefore
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{originalPackageId}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.3
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/original-package-before-provider-rename.json
+
+###############################################################################
+# Part 1.4 - Verify the mapped Blueprint
+#
+# Expected: 200. Confirm its object ID and appId match the locked assignment.
+
+# @name renameGetBlueprintBefore
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.4
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-before-rename.json
+
+###############################################################################
+# Part 1.5 - Verify the enabled Blueprint principal
+#
+# Expected: 200. Confirm id equals A365_DEMO_BLUEPRINT_PRINCIPAL_ID, appId
+# equals A365_DEMO_BLUEPRINT_APP_ID, and accountEnabled is not false.
+
+# @name renameGetBlueprintPrincipalBefore
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.5
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-before-rename.json
+
+###############################################################################
+# Part 1.6 - Capture the existing Agent Identity
+#
+# Expected: 200. Record only field presence and safe comparison results in
+# tracked notes.
+
+# @name renameGetIdentityBefore
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.6
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/agent-identity-before-rename.json
+
+###############################################################################
+# Part 1.7 - Capture the existing companion Registration
+#
+# Expected: 200.
+# Confirm:
+# - the ID is A365_DEMO_COMPANION_REGISTRATION_ID
+# - sourceAgentId equals A365_DEMO_COMPANION_SOURCE_AGENT_ID exactly
+# - new mappings use agent-governance:companion:v1:gcp:<provider-source-id>
+# - preserve a mapped legacy value rather than changing identity during rename
+# - agentIdentityBlueprintId equals A365_DEMO_BLUEPRINT_APP_ID
+# - agentIdentityId equals A365_DEMO_AGENT_IDENTITY_ID
+
+# @name renameGetRegistrationBefore
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 1.7
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-registration-before-rename.json
+
+###############################################################################
+# Manual provider checkpoint - no request
+#
+# Only with explicit approval, rename the existing disposable GCP agent in its
+# supported provider administration interface. Do not delete or recreate it.
+#
+# Wait for a successful Registry Sync cycle and the agreed propagation period.
+# Then set:
+#
+# A365_RENAME_NEW_TARGET_NAME=<new-provider-display-name>
+#
+# Do not change A365_DEMO_PROVIDER_SOURCE_AGENT_ID. It is the before value used
+# for byte-for-byte comparison.
+
+###############################################################################
+# Part 2.1 - Read Package inventory after provider rename and sync
+#
+# Expected: 200. Read every page.
+#
+# Find the Package carrying the new display name, then identify it using its
+# platform, provider scope, and exact nested sourceAgentId. Put its observed
+# Package ID into A365_RENAME_AFTER_PACKAGE_ID.
+
+# @name renameListPackagesAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 2.1
+#
+# 1. Save the first page:
+# ../../evidence/demos/02-rename-companion/package-list-after-provider-rename-page-1.json
+# 2. If @odata.nextLink exists, save every additional page as
+#    package-list-after-provider-rename-page-2.json, page-3.json, and so on.
+# 3. Set A365_RENAME_AFTER_PACKAGE_ID only after locating exactly one Package
+#    with the expected platform, provider scope, and unchanged sourceAgentId.
+
+###############################################################################
+# Part 2.2 - Read the selected Package after provider rename and sync
+#
+# Expected: 200 after A365_RENAME_AFTER_PACKAGE_ID is set.
+# Copy the exact nested LastModifiedDateTime into
+# A365_RENAME_SOURCE_MODIFIED_AT before any PATCH.
+
+# @name renameGetPackageAfter
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{afterPackageId}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 2.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/provider-package-after-rename.json
+#
+# Copy the exact nested LastModifiedDateTime into
+# A365_RENAME_SOURCE_MODIFIED_AT before continuing to Stop A.
+
+###############################################################################
+# Stop A - classify before sending any PATCH
+#
+# Compare Part 1.3 and Part 2.2 byte-for-byte:
+#
+# A. Same sourceAgentId and same provider scope:
+#    This is an in-place rename candidate. The Package ID may be unchanged or
+#    replaced; update only the Package ID in the durable mapping if needed.
+#
+# B. Different sourceAgentId or provider scope:
+#    Stop. Record reconciliation-required. Do not PATCH, POST, or DELETE any
+#    companion object. This may be a source migration or delete plus add.
+#
+# C. Old and new Packages both remain:
+#    Stop. Allow more sync time and investigate duplication.
+#
+# D. No renamed Package is visible:
+#    Stop. The result is unavailable or inconclusive, not deletion.
+#
+# Continue only for case A and only after confirming that the saved
+# companion Registration and Agent Identity still belong to this source.
+
+###############################################################################
+# Mapping checkpoint - record the observed provider rename
+#
+# Run from the Lab 20 directory:
+#
+# python demos/02-rename-companion/prepare_rename.py
+#
+# This writes mapping-after-rename.json with the observed display name of each
+# object. For the current rename, nameSyncStatus should be pending. Re-run the
+# same command after every verified GET below; it advances to in-sync only
+# when every object covered by the assignment policy has its expected name.
+# After at least one, but not all, expected names are verified, it reports
+# partial.
+#
+# The mapping records these independent observations:
+# - packageDisplayName
+# - blueprintDisplayName
+# - blueprintPrincipalDisplayName
+# - agentIdentityDisplayName
+# - companionRegistrationDisplayName
+# - companionPackageDisplayName
+# - nameSyncStatus
+
+###############################################################################
+# Part 3 - Synchronize the Blueprint names
+#
+# Dedicated example:
+#   GCP Agent A owns its own Blueprint, so the Blueprint name follows Agent A.
+#
+# Shared example:
+#   Agents A and B use "Support Team Blueprint", so neither agent may rename
+#   the shared Blueprint or principal. Skip Part 3 and continue to Part 4.
+
+###############################################################################
+# Part 3.1 - Rename the dedicated Blueprint
+#
+# Send only when A365_DEMO_ASSIGNMENT_MODE is dedicated and the mapped
+# Blueprint is used only by this provider source. Do not send for shared mode.
+#
+# If Authentication 1 and 2 were completed before this file added
+# AgentIdentityBlueprint.UpdateBranding.All, request a fresh device code and
+# token. Stop rather than approving unexpected tenant-wide consent.
+#
+# Expected: 204. This changes only the Blueprint displayName.
+
+# @name renamePatchBlueprint
+PATCH {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{newTargetName}} - dedicated disposable Blueprint"
+}
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.1
+#
+# A successful 204 has no JSON response body. Do not create a fake JSON
+# response file. Continue immediately to Part 3.2.
+
+###############################################################################
+# Part 3.2 - Verify the dedicated Blueprint rename
+#
+# Expected: 200 with the same object ID and appId and the new displayName.
+
+# @name renameGetBlueprintAfterNameSync
+GET {{graphBaseUrl}}/v1.0/applications/{{blueprintObjectId}}/microsoft.graph.agentIdentityBlueprint
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-after-name-sync.json
+#
+# Confirm the object ID and appId match blueprint-before-rename.json. Then run:
+# python demos/02-rename-companion/prepare_rename.py
+
+###############################################################################
+# Part 3.3 - Observe whether the Blueprint principal followed automatically
+#
+# Expected: 200 with the same principal ID and appId. This observation answers
+# whether changing the Blueprint also updates its tenant principal.
+#
+# The completed disposable GCP run observed that both displayName and
+# appDisplayName followed the Blueprint automatically. Still send this GET on
+# every run; the observation is not a cross-provider or timing guarantee.
+
+# @name renameGetBlueprintPrincipalAfterBlueprint
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.3
+#
+# If the principal already has the new Blueprint name, save:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-after-name-sync.json
+#
+# Then run prepare_rename.py and skip Parts 3.4 through 3.7. This was the path
+# taken by the completed disposable GCP run.
+#
+# If it still has the old name, save instead:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-after-blueprint-rename.json
+# and continue to Stop B.
+
+###############################################################################
+# Stop B - separately approve a Blueprint principal rename
+#
+# The documented general service-principal update requires
+# Application.ReadWrite.All. That broader permission is intentionally absent
+# from the normal rename token.
+#
+# Stop with nameSyncStatus=blocked unless all of the following are true:
+# - the principal did not follow the Blueprint automatically;
+# - the assignment is dedicated;
+# - this exact principal update is explicitly approved;
+# - the public client and operator are already authorized for the broader
+#   permission; and
+# - browser sign-in does not request new tenant consent.
+#
+# Parts 3.4 through 3.7 are an optional bounded experiment, not the default
+# committed-fleet path.
+#
+# When the principal name is required by policy but this branch cannot safely
+# run, record the boundary:
+# python demos/02-rename-companion/prepare_rename.py --blocked
+
+###############################################################################
+# Part 3.4 - OPTIONAL request a separate principal-write device code
+#
+# Never save this response. Stop if sign-in asks for new tenant consent.
+
+# @name renamePrincipalStartDeviceCode
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/devicecode
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&scope={{principalRenameScopes}}
+
+###
+
+###############################################################################
+# Part 3.5 - OPTIONAL exchange the principal-write device code
+#
+# Never save this response.
+
+# @name renamePrincipalToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code&client_id={{clientId}}&device_code={{renamePrincipalStartDeviceCode.response.body.$.device_code}}
+
+###
+
+###############################################################################
+# Part 3.6 - OPTIONAL rename the dedicated Blueprint principal
+#
+# Expected: 204. Change only displayName and identify the derived type.
+
+# @name renamePatchBlueprintPrincipal
+PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{blueprintPrincipalId}}
+Authorization: Bearer {{renamePrincipalToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "@odata.type": "#microsoft.graph.agentIdentityBlueprintPrincipal",
+  "displayName": "{{newTargetName}} - dedicated disposable Blueprint"
+}
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.6
+#
+# A successful 204 has no JSON response body. Do not create a fake JSON
+# response file. Continue immediately to Part 3.7.
+
+###############################################################################
+# Part 3.7 - Verify the Blueprint principal rename
+#
+# Expected: 200 with unchanged ID and appId and the new displayName.
+
+# @name renameGetBlueprintPrincipalAfterNameSync
+GET {{graphBaseUrl}}/v1.0/servicePrincipals(appId='{{blueprintAppId}}')/microsoft.graph.agentIdentityBlueprintPrincipal
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 3.7
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/blueprint-principal-after-name-sync.json
+#
+# Run:
+# python demos/02-rename-companion/prepare_rename.py
+
+###############################################################################
+# Part 4.1 - Rename the existing Agent Identity
+#
+# Expected: 204. This changes display metadata only; the Identity ID and
+# Blueprint relationship must remain unchanged.
+
+# @name renamePatchIdentity
+PATCH {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "displayName": "{{newTargetName}} - managed Agent Identity"
+}
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.1
+#
+# A successful 204 has no JSON response body. Do not create a fake JSON file.
+
+###############################################################################
+# Part 4.2 - Verify the Agent Identity rename
+#
+# Expected: 200 with the same ID and Blueprint appId and the new displayName.
+
+# @name renameGetIdentityAfterNameSync
+GET {{graphBaseUrl}}/v1.0/servicePrincipals/{{agentIdentityId}}/microsoft.graph.agentIdentity
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 4.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/agent-identity-after-name-sync.json
+#
+# Confirm the ID and Blueprint appId are unchanged. Then run:
+# python demos/02-rename-companion/prepare_rename.py
+
+###############################################################################
+# Part 5.1 - Rename the existing companion Registration
+#
+# Expected: 200 with an empty response body.
+#
+# Do not PATCH sourceAgentId, originatingStore, Blueprint, identity, or owner.
+# Carry the exact newly observed provider source-modified timestamp.
+
+# @name renamePatchRegistration
+PATCH {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Content-Type: application/json
+Accept: application/json
+OData-Version: 4.0
+
+{
+  "displayName": "{{newTargetName}} - managed companion",
+  "sourceLastModifiedDateTime": "{{newSourceModifiedAt}}"
+}
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.1
+#
+# A successful 200 has no JSON response body. Do not create a fake JSON file.
+
+###############################################################################
+# Part 5.2 - Verify the companion Registration rename
+#
+# Expected: 200 with unchanged IDs, source, owners, and the new displayName.
+
+# @name renameGetRegistrationAfterNameSync
+GET {{graphBaseUrl}}/beta/copilot/agentRegistrations/{{companionRegistrationIdPath}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+OData-Version: 4.0
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 5.2
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-registration-after-name-sync.json
+#
+# Confirm every ID and owner matches companion-registration-before-rename.json.
+# Then run:
+# python demos/02-rename-companion/prepare_rename.py
+
+###############################################################################
+# Part 6.1 - Observe the companion Package name
+#
+# Expected: 200. The companion Package is an observation, not a PATCH target.
+# Do not assume the Registration name propagates immediately.
+#
+# The completed disposable GCP run observed propagation to the existing
+# companion Package without a Package ID change. Continue to verify this on
+# every run rather than treating it as an immediate product guarantee.
+
+# @name renameGetCompanionPackageAfterNameSync
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages/{{companionPackageId}}
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 6.1
+#
+# Save:
+# ../../evidence/demos/02-rename-companion/companion-package-after-name-sync.json
+#
+# If the old name remains, wait the agreed propagation period and retry only
+# this GET. Do not PATCH the Package and do not repeat the Registration PATCH.
+#
+# Run prepare_rename.py after every saved observation.
+
+###############################################################################
+# Part 6.2 - Refresh inventory after all name updates
+#
+# Expected: 200. This catches a changed Package ID or duplicate record.
+
+# @name renameListPackagesFinal
+GET {{graphBaseUrl}}/v1.0/copilot/admin/catalog/packages
+Authorization: Bearer {{renameToken.response.body.$.access_token}}
+Accept: application/json
+
+###
+
+###############################################################################
+# REQUIRED AFTER PART 6.2
+#
+# 1. Save the first page:
+# ../../evidence/demos/02-rename-companion/package-list-after-name-sync-page-1.json
+# 2. Save every linked page as page-2.json, page-3.json, and so on.
+# 3. Require one provider Package and one companion Package for the mapping.
+# 4. Run:
+# python demos/02-rename-companion/prepare_rename.py
+#
+# The final nameSyncStatus is in-sync only when every in-scope name matches.
+# It is pending before any target name is applied, partial after only some
+# names are applied, and blocked when a required update cannot safely run.
+# Never delete and recreate an object to repair a display name.
+
+###############################################################################
+# Cleanup - restore names only after restoring the provider name
+#
+# To return the disposable experiment to its original names:
+# 1. Rename the provider agent back through its supported provider interface.
+# 2. Wait for healthy Registry Sync and prove the stable source key again.
+# 3. Set A365_RENAME_NEW_TARGET_NAME to the original oldTargetName value.
+# 4. Repeat Parts 3 through 6.
+# 5. For shared mode, continue to skip Blueprint and principal rename.
+# 6. Preserve the final rollback evidence and mapping; do not erase history.
+#
+# See findings.md for the sanitized result of the completed GCP run.
