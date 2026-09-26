@@ -99,7 +99,10 @@ function Invoke-BoundedAz {
         if ($process.ExitCode -ne 0) {
             if (
                 $AllowNotFound -and
-                $stderr -match 'not found|could not be found|ResourceNotFound'
+                $stderr -match (
+                    'not found|could not be found|does not exist|' +
+                    'ResourceNotFound|manifest unknown'
+                )
             ) {
                 return $null
             }
