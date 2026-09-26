@@ -15,6 +15,15 @@ $names = Get-ExperimentNames
 $state = Read-ExperimentState -Path (Get-StatePath -BindingPath $BindingPath)
 foreach ($section in @('gate2', 'gate2Sessions', 'aws', 'sessions', 'entra')) {
     if ($state.ContainsKey($section)) {
+        if (
+            $section -eq 'gate2' -and
+            $state['gate2']['azureSecretSoftDeleted'] -eq $true
+        ) {
+            throw (
+                'The experiment Key Vault secret remains soft-deleted ' +
+                'under shared purge protection.'
+            )
+        }
         throw "Cleanup state still contains the $section section."
     }
 }

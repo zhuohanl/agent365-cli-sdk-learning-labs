@@ -23,10 +23,44 @@ if (-not $state.ContainsKey('gate2')) {
     Write-Output '{"gate2Cleanup":"already-absent"}'
     exit 0
 }
+$gate2 = $state['gate2']
+if (
+    $gate2['azureSecretSoftDeleted'] -and
+    (-not $state.ContainsKey('entra') -or -not $state.ContainsKey('aws'))
+) {
+    az account set --subscription $binding.AzureSubscriptionId --only-show-errors
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The Azure subscription context could not be selected.'
+    }
+    $deletedSecret = Invoke-BoundedAz `
+        -Arguments @(
+            'keyvault', 'secret', 'show-deleted',
+            '--subscription', $binding.AzureSubscriptionId,
+            '--vault-name', $binding.KeyVaultName,
+            '--name', $names.TransportSecret,
+            '--only-show-errors',
+            '--output', 'json'
+        ) `
+        -TimeoutSeconds 60 `
+        -AllowNotFound
+    if ($deletedSecret) {
+        if (
+            [string]$deletedSecret.kid -ne
+                [string]$gate2['azureSecretId']
+        ) {
+            throw 'The soft-deleted Key Vault secret does not match state.'
+        }
+        Write-Output '{"gate2Cleanup":"pending-platform-purge"}'
+        exit 0
+    }
+    $state.Remove('gate2')
+    Save-ExperimentState -Path $statePath -State $state
+    Write-Output '{"gate2Cleanup":"complete"}'
+    exit 0
+}
 if (-not $state.ContainsKey('entra') -or -not $state.ContainsKey('aws')) {
     throw 'Gate 2 cleanup requires the retained identity and AWS state.'
 }
-$gate2 = $state['gate2']
 $entra = $state['entra']
 
 function ConvertTo-CanonicalRequiredResourceAccess {
@@ -485,34 +519,68 @@ if ($gate2['azureSecretId']) {
                 -TimeoutSeconds 60 `
                 -AllowNotFound)
         }
-    $null = Invoke-BoundedAz `
+    $vault = Invoke-BoundedAz `
         -Arguments @(
-            'keyvault', 'secret', 'purge',
+            'keyvault', 'show',
             '--subscription', $binding.AzureSubscriptionId,
-            '--vault-name', $binding.KeyVaultName,
-            '--name', $names.TransportSecret,
-            '--only-show-errors'
+            '--resource-group', $binding.KeyVaultResourceGroup,
+            '--name', $binding.KeyVaultName,
+            '--only-show-errors',
+            '--output', 'json'
         ) `
-        -TimeoutSeconds 120 `
-        -AllowNotFound `
-        -Raw
-    Wait-Until `
-        -TimeoutSeconds $TimeoutSeconds `
-        -FailureMessage 'The owned Key Vault secret remains soft-deleted.' `
-        -Test {
-            $null -eq (Invoke-BoundedAz `
-                -Arguments @(
-                    'keyvault', 'secret', 'show-deleted',
-                    '--subscription', $binding.AzureSubscriptionId,
-                    '--vault-name', $binding.KeyVaultName,
-                    '--name', $names.TransportSecret,
-                    '--only-show-errors',
-                    '--output', 'json'
-                ) `
-                -TimeoutSeconds 60 `
-                -AllowNotFound)
+        -TimeoutSeconds 60
+    if ($vault.properties.enablePurgeProtection -eq $true) {
+        $deletedSecret = Invoke-BoundedAz `
+            -Arguments @(
+                'keyvault', 'secret', 'show-deleted',
+                '--subscription', $binding.AzureSubscriptionId,
+                '--vault-name', $binding.KeyVaultName,
+                '--name', $names.TransportSecret,
+                '--only-show-errors',
+                '--output', 'json'
+            ) `
+            -TimeoutSeconds 60
+        if (
+            [string]$deletedSecret.kid -ne
+                [string]$gate2['azureSecretId']
+        ) {
+            throw 'The soft-deleted Key Vault secret does not match state.'
         }
-    $gate2.Remove('azureSecretId')
+        $gate2['azureSecretSoftDeleted'] = $true
+        $gate2['azureSecretScheduledPurgeDate'] = (
+            [string]$deletedSecret.scheduledPurgeDate
+        )
+    }
+    else {
+        $null = Invoke-BoundedAz `
+            -Arguments @(
+                'keyvault', 'secret', 'purge',
+                '--subscription', $binding.AzureSubscriptionId,
+                '--vault-name', $binding.KeyVaultName,
+                '--name', $names.TransportSecret,
+                '--only-show-errors'
+            ) `
+            -TimeoutSeconds 120 `
+            -AllowNotFound `
+            -Raw
+        Wait-Until `
+            -TimeoutSeconds $TimeoutSeconds `
+            -FailureMessage 'The owned Key Vault secret remains soft-deleted.' `
+            -Test {
+                $null -eq (Invoke-BoundedAz `
+                    -Arguments @(
+                        'keyvault', 'secret', 'show-deleted',
+                        '--subscription', $binding.AzureSubscriptionId,
+                        '--vault-name', $binding.KeyVaultName,
+                        '--name', $names.TransportSecret,
+                        '--only-show-errors',
+                        '--output', 'json'
+                    ) `
+                    -TimeoutSeconds 60 `
+                    -AllowNotFound)
+            }
+        $gate2.Remove('azureSecretId')
+    }
     Save-ExperimentState -Path $statePath -State $state
 }
 
@@ -615,12 +683,25 @@ $remainingKeys = @(
         Where-Object {
             $_ -notin @(
                 'runtimeDetached',
-                'siteId'
+                'siteId',
+                'azureSecretId',
+                'azureSecretSoftDeleted',
+                'azureSecretScheduledPurgeDate'
             )
         }
 )
 if ($remainingKeys.Count -gt 0) {
     throw 'Gate 2 cleanup is incomplete; ignored state retains unfinished keys.'
+}
+$softDeletePending = $gate2['azureSecretSoftDeleted'] -eq $true
+if ($softDeletePending) {
+    Save-ExperimentState -Path $statePath -State $state
+    Remove-Item `
+        -LiteralPath (Join-Path $labRoot 'gate2.containerapp.local.yaml') `
+        -Force `
+        -ErrorAction SilentlyContinue
+    Write-Output '{"gate2Cleanup":"pending-platform-purge"}'
+    exit 0
 }
 $state.Remove('gate2')
 Save-ExperimentState -Path $statePath -State $state

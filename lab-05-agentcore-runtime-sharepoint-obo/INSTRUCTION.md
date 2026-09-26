@@ -372,6 +372,12 @@ sessions are stopped through bounded bearer-authenticated HTTPS rather than
 the SigV4 AWS CLI operation. The cleanup opens the approved public-client
 interactive sign-in only when tracked sessions remain.
 
+If the shared Key Vault enforces purge protection, cleanup deletes the active
+experiment secret, verifies the exact soft-deleted record, retains its
+scheduled platform purge in ignored state, and continues deleting unrelated
+experiment resources. Final verification remains incomplete until Key Vault
+automatically purges that record; the script never weakens the shared Vault.
+
 Cleanup removes owned objects in dependency order:
 
 1. stop active proof sessions;

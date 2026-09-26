@@ -579,3 +579,8 @@ Runtime logs, and Entra identities. Every mutation has a bounded timeout and
 live-state verification. A failure preserves the unfinished state key for a
 safe retry; completion is reported only after the final verifier confirms the
 owned objects are absent and the shared Azure and SharePoint baselines remain.
+If shared Key Vault purge protection prevents immediate permanent deletion,
+the active secret is removed and its exact soft-deleted record remains in
+ignored state until the platform retention period ends. Cleanup must not
+disable that shared protection or report full completion while the record
+exists.
