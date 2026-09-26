@@ -1,0 +1,24 @@
+[project]
+name = "agentcore-sharepoint-obo-proof"
+version = "0.1.0"
+description = "Proof-minimal AgentCore Runtime delegated SharePoint feasibility experiment"
+requires-python = "==3.12.*"
+dependencies = [
+    "boto3>=1.39.8,<2",
+    "PyJWT[crypto]==2.10.1",
+    "python-docx==1.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+]
+
+[[tool.uv.index]]
+name = "microsoft-package-feed-proxy"
+url = "https://packagefeedproxy.microsoft.io/pypi/simple"
+default = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

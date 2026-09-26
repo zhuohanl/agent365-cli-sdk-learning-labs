@@ -1,0 +1,51 @@
+experiment:
+  resource_prefix: lab-agentcore-sharepoint-obo
+  stage: preflight
+
+approvals:
+  identity_write: pending
+  aws_write: pending
+  azure_write: pending
+  gate3_4_write: pending
+  gate4_label_policy_write: pending
+  gate4_label_v1_app_write: pending
+  cleanup_write: pending
+
+aws:
+  profile: replace-in-local-binding
+  account_id: replace-in-local-binding
+  region: replace-in-local-binding
+  environment_class: test
+  log_retention_days: 1
+  cleanup_owner_reference: replace-in-local-binding
+  monthly_cost_ceiling_reference: replace-in-local-binding
+
+entra:
+  tenant_id: replace-in-local-binding
+  public_client_redirect_uri: http://localhost:8400/callback
+  required_scope: access_agent
+
+evidence:
+  directory: evidence
+  retain_raw_tokens: false
+
+gate2:
+  subscription_id: replace-in-local-binding
+  location: replace-in-local-binding
+  resource_group_name: replace-in-local-binding
+  container_apps_environment_name: replace-in-local-binding
+  container_registry_name: replace-in-local-binding
+  key_vault_resource_group_name: replace-in-local-binding
+  key_vault_name: replace-in-local-binding
+  sharepoint_site_url: replace-in-local-binding
+
+gate3:
+  model_id: anthropic.claude-3-haiku-20240307-v1:0
+
+gate4:
+  document_library_name: replace-in-local-binding
+  folder_path: replace-in-local-binding
+  readable_file_name: replace-in-local-binding
+  secondary_readable_file_name: replace-in-local-binding
+  protected_file_name: replace-in-local-binding
+  protected_label_name: replace-in-local-binding

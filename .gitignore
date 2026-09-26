@@ -7,3 +7,7 @@
 **/.env
 **/*.token
 **/*.secret
+**/binding.local.yaml
+**/*.local.yaml
+**/*.local.json
+**/evidence/*.json

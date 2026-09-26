@@ -14,6 +14,7 @@ The labs use a starter-first method. Do not run the solution first.
 | [Lab 2](lab-02-local-observability/INSTRUCTION.md) | The same echo runtime | Add Agent 365 observability | The runtime emits a local agent span |
 | [Lab 3](lab-03-enterprise-agent-identity/INSTRUCTION.md) | The observable echo runtime | Add an Entra Auth SDK sidecar token path | The runtime gets an Agent Identity token and Graph enforces operation permissions |
 | [Lab 4](lab-04-governance-control-boundaries/INSTRUCTION.md) | The Lab 3 identity-bound path | Change Registry and Entra administrative state | Control-plane block, token enforcement, and local compute behavior are separated |
+| [Lab 5](lab-05-agentcore-runtime-sharepoint-obo/INSTRUCTION.md) | An approved cross-cloud OBO design | Prove the two feasibility gates before implementation | AgentCore forwards an isolated user assertion, then reaches a fixed-site ACA OBO probe |
 
 ## Key lessons
 
@@ -23,6 +24,7 @@ The labs use a starter-first method. Do not run the solution first.
 | Lab 2 | Agent 365 observability instruments the runtime and produces structured OpenTelemetry spans. A local span does not prove Microsoft backend ingestion or runtime governance. |
 | Lab 3 | An Enterprise Agent Identity can obtain a resource token. When the runtime requests and presents that token, only the tested outbound resource call is bound to the identity. The full runtime is not automatically bound or controlled. |
 | Lab 4 | A Registry block, an identity disable action, and a compute stop are different controls. A control affects the real runtime only where execution depends on the controlled gate. |
+| Lab 5 | Test the Runtime assertion boundary and the ACA OBO boundary before adding a UI, model loop, file retrieval, or protected-file behavior. |
 
 Each lab contains:
 
@@ -60,6 +62,9 @@ After each checkpoint:
 - Use only a disposable learning registration.
 
 See [Security and cleanup](docs/security-and-cleanup.md) before you start.
+
+The complete issue-206 feasibility record is in
+[AgentCore Runtime delegated SharePoint OBO experiment](docs/research/agentcore-runtime-sharepoint-obo-experiment.md).
 
 ## Prerequisites
 

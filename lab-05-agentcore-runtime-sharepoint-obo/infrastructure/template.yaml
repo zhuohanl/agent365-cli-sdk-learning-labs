@@ -1,0 +1,218 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Proof-minimal AgentCore Runtime for delegated SharePoint Gate 1.
+
+Parameters:
+  PlatformName:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{2,47}$'
+  RuntimeName:
+    Type: String
+    AllowedPattern: '^[a-zA-Z][a-zA-Z0-9_]{0,47}$'
+  ImageUri:
+    Type: String
+    Default: ''
+  EnvironmentClass:
+    Type: String
+    AllowedValues:
+      - development
+      - test
+  DiscoveryUrl:
+    Type: String
+  ExpectedIssuer:
+    Type: String
+  AllowedAudience:
+    Type: String
+  AllowedClient:
+    Type: String
+  AllowedScope:
+    Type: String
+  Gate2McpUrl:
+    Type: String
+    Default: ''
+  Gate2SecretName:
+    Type: String
+    Default: ''
+  Gate3ModelId:
+    Type: String
+    Default: ''
+  RuntimeEnabled:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+  IdleRuntimeSessionTimeout:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 900
+  MaxLifetime:
+    Type: Number
+    Default: 900
+    MinValue: 60
+    MaxValue: 1800
+
+Conditions:
+  CreateRuntime: !Equals [!Ref RuntimeEnabled, 'true']
+  Gate2Configured: !Not [!Equals [!Ref Gate2SecretName, '']]
+  Gate3Configured: !Not [!Equals [!Ref Gate3ModelId, '']]
+
+Resources:
+  AgentRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      RepositoryName: !Ref PlatformName
+      EmptyOnDelete: false
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      Tags:
+        - Key: project
+          Value: agent365-learning-lab
+        - Key: environment
+          Value: !Ref EnvironmentClass
+        - Key: lifecycle
+          Value: experiment
+        - Key: managed-by
+          Value: issue-206
+
+  RuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      RoleName: !Sub '${PlatformName}-runtime-role'
+      Description: Proof-minimal delegated assertion Runtime role.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AgentCoreAssumeRole
+            Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: proof-minimal-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PullOwnedImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !GetAtt AgentRepository.Arn
+              - Sid: GetEcrToken
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: ManageOwnedRuntimeLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*'
+              - Sid: WriteOwnedRuntimeLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
+              - !If
+                - Gate2Configured
+                - Sid: ReadOwnedGate2TransportKey
+                  Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Gate2SecretName}-*'
+                - !Ref AWS::NoValue
+              - !If
+                - Gate3Configured
+                - Sid: InvokeOwnedGate3Model
+                  Effect: Allow
+                  Action: bedrock:InvokeModel
+                  Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${Gate3ModelId}'
+                - !Ref AWS::NoValue
+      Tags:
+        - Key: project
+          Value: agent365-learning-lab
+        - Key: environment
+          Value: !Ref EnvironmentClass
+        - Key: lifecycle
+          Value: experiment
+        - Key: managed-by
+          Value: issue-206
+
+  AgentRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: CreateRuntime
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AgentRuntimeName: !Ref RuntimeName
+      AgentRuntimeArtifact:
+        ContainerConfiguration:
+          ContainerUri: !Ref ImageUri
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Ref DiscoveryUrl
+          AllowedAudience:
+            - !Ref AllowedAudience
+          AllowedScopes:
+            - !Ref AllowedScope
+          CustomClaims:
+            - InboundTokenClaimName: azp
+              InboundTokenClaimValueType: STRING
+              AuthorizingClaimMatchValue:
+                ClaimMatchOperator: EQUALS
+                ClaimMatchValue:
+                  MatchValueString: !Ref AllowedClient
+      RequestHeaderConfiguration:
+        RequestHeaderAllowlist:
+          - Authorization
+      Description: Validate and isolate one delegated user assertion.
+      EnvironmentVariables:
+        OIDC_DISCOVERY_URL: !Ref DiscoveryUrl
+        EXPECTED_ISSUER: !Ref ExpectedIssuer
+        EXPECTED_AUDIENCE: !Ref AllowedAudience
+        EXPECTED_CLIENT_ID: !Ref AllowedClient
+        REQUIRED_SCOPE: !Ref AllowedScope
+        GATE2_MCP_URL: !Ref Gate2McpUrl
+        GATE2_SECRET_ID: !Ref Gate2SecretName
+        GATE3_MODEL_ID: !Ref Gate3ModelId
+      LifecycleConfiguration:
+        IdleRuntimeSessionTimeout: !Ref IdleRuntimeSessionTimeout
+        MaxLifetime: !Ref MaxLifetime
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      ProtocolConfiguration: HTTP
+      RoleArn: !GetAtt RuntimeExecutionRole.Arn
+      Tags:
+        project: agent365-learning-lab
+        environment: !Ref EnvironmentClass
+        lifecycle: experiment
+        managed-by: issue-206
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt AgentRepository.RepositoryUri
+  ExecutionRoleArn:
+    Value: !GetAtt RuntimeExecutionRole.Arn
+  AgentRuntimeArn:
+    Condition: CreateRuntime
+    Value: !GetAtt AgentRuntime.AgentRuntimeArn
+  AgentRuntimeId:
+    Condition: CreateRuntime
+    Value: !GetAtt AgentRuntime.AgentRuntimeId
+  AgentRuntimeVersion:
+    Condition: CreateRuntime
+    Value: !GetAtt AgentRuntime.AgentRuntimeVersion
