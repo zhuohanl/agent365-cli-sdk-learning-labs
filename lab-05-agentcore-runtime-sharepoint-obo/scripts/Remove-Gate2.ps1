@@ -205,7 +205,7 @@ if ($gate2['requiredResourceAccessConfigured']) {
         -ExpectedStatus @(204)
     $restored = Invoke-BoundedGraph `
         -Method GET `
-        -Uri "$blueprintUri?`$select=requiredResourceAccess" `
+        -Uri "${blueprintUri}?`$select=requiredResourceAccess" `
         -TimeoutSeconds 60 `
         -ExpectedStatus @(200)
     $expectedJson = ConvertTo-CanonicalRequiredResourceAccess `
