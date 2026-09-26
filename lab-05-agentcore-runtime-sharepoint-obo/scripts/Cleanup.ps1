@@ -68,6 +68,7 @@ function Invoke-BoundedAz {
         [switch] $Raw
     )
 
+    $commandName = ($Arguments | Select-Object -First 3) -join ' '
     $stdoutPath = Join-Path $env:TEMP "gate-cleanup-az-$([guid]::NewGuid()).out"
     $stderrPath = Join-Path $env:TEMP "gate-cleanup-az-$([guid]::NewGuid()).err"
     $argumentLine = (
@@ -102,7 +103,28 @@ function Invoke-BoundedAz {
             ) {
                 return $null
             }
-            throw "Azure CLI command failed with exit code $($process.ExitCode)."
+            $safeError = $stderr
+            foreach ($argument in @($Arguments | Select-Object -Skip 3)) {
+                if (
+                    $argument -and
+                    -not $argument.StartsWith('--') -and
+                    $argument.Length -ge 4
+                ) {
+                    $safeError = $safeError.Replace(
+                        $argument,
+                        '<redacted-argument>'
+                    )
+                }
+            }
+            $safeError = $safeError -replace 'https://[^\s"'']+', '<redacted-url>'
+            $safeError = $safeError -replace '\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b', '<redacted-id>'
+            if ([string]::IsNullOrWhiteSpace($safeError)) {
+                $safeError = "exit code $($process.ExitCode)"
+            }
+            throw (
+                "Azure CLI command '$commandName' failed: " +
+                $safeError.Trim()
+            )
         }
         if ($Raw) {
             return $stdout
