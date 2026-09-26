@@ -11,6 +11,9 @@ SCRIPTS = Path(__file__).parents[1] / "scripts"
 def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     gate2 = (SCRIPTS / "Remove-Gate2.ps1").read_text(encoding="utf-8")
     gate1_aws = (SCRIPTS / "Remove-Gate1Aws.ps1").read_text(encoding="utf-8")
+    gate1_identity = (SCRIPTS / "Remove-Gate1Identity.ps1").read_text(
+        encoding="utf-8"
+    )
     cleanup = (SCRIPTS / "Cleanup.ps1").read_text(encoding="utf-8")
 
     assert "stop-runtime-session" not in gate2
@@ -22,6 +25,7 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     assert "pending-platform-purge" in gate2
     assert "[string]$deletedSecret.id" in gate2
     assert "does not exist" in cleanup
+    assert "azureSecretSoftDeleted" in gate1_identity
 
 
 def load_stop_module() -> ModuleType:

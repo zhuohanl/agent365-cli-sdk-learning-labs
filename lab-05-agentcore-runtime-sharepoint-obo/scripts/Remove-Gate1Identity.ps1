@@ -22,8 +22,30 @@ if (-not $state.ContainsKey('entra')) {
     Write-Output '{"identityCleanup":"already-absent"}'
     exit 0
 }
-if ($state.ContainsKey('gate2') -or $state.ContainsKey('aws')) {
+if ($state.ContainsKey('aws')) {
     throw 'Identity cleanup requires Gate 2 and AWS cleanup to complete first.'
+}
+if ($state.ContainsKey('gate2')) {
+    $allowedGate2Keys = @(
+        'runtimeDetached',
+        'siteId',
+        'azureSecretId',
+        'azureSecretSoftDeleted',
+        'azureSecretScheduledPurgeDate'
+    )
+    $blockingGate2Keys = @(
+        $state['gate2'].Keys |
+            Where-Object { $_ -notin $allowedGate2Keys }
+    )
+    if (
+        $state['gate2']['azureSecretSoftDeleted'] -ne $true -or
+        $blockingGate2Keys.Count -gt 0
+    ) {
+        throw (
+            'Identity cleanup requires all non-platform Gate 2 cleanup ' +
+            'to complete first.'
+        )
+    }
 }
 
 Connect-MgGraph -TenantId $binding.TenantId -Scopes @(
