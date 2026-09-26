@@ -14,6 +14,9 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     gate1_identity = (SCRIPTS / "Remove-Gate1Identity.ps1").read_text(
         encoding="utf-8"
     )
+    orchestrator = (SCRIPTS / "Remove-Experiment.ps1").read_text(
+        encoding="utf-8"
+    )
     cleanup = (SCRIPTS / "Cleanup.ps1").read_text(encoding="utf-8")
 
     assert "stop-runtime-session" not in gate2
@@ -26,6 +29,7 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     assert "[string]$deletedSecret.id" in gate2
     assert "does not exist" in cleanup
     assert "azureSecretSoftDeleted" in gate1_identity
+    assert "Min($TimeoutSeconds, 300)" in orchestrator
 
 
 def load_stop_module() -> ModuleType:

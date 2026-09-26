@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string] $BindingPath,
-    [ValidateRange(60, 600)][int] $TimeoutSeconds = 120
+    [ValidateRange(60, 300)][int] $TimeoutSeconds = 120
 )
 
 Set-StrictMode -Version Latest

@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
     -TimeoutSeconds $TimeoutSeconds
 & (Join-Path $PSScriptRoot 'Remove-Gate1Identity.ps1') `
     -BindingPath $BindingPath `
-    -TimeoutSeconds ([Math]::Min($TimeoutSeconds, 600))
+    -TimeoutSeconds ([Math]::Min($TimeoutSeconds, 300))
 & (Join-Path $PSScriptRoot 'Test-CleanupResult.ps1') `
     -BindingPath $BindingPath `
     -TimeoutSeconds $TimeoutSeconds
