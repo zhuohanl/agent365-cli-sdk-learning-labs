@@ -16,6 +16,49 @@ $statePath = Get-StatePath -BindingPath $BindingPath
 $state = Read-ExperimentState -Path $statePath
 $labRoot = Split-Path -Parent $PSScriptRoot
 
+function Remove-ExperimentAcrRepository {
+    param(
+        [Parameter(Mandatory)][object] $Binding,
+        [Parameter(Mandatory)][object] $Names
+    )
+
+    $repository = Invoke-BoundedAz `
+        -Arguments @(
+            'acr', 'repository', 'show',
+            '--name', $Binding.ContainerRegistry,
+            '--repository', $Names.AzureRepository,
+            '--only-show-errors',
+            '--output', 'json'
+        ) `
+        -TimeoutSeconds 60 `
+        -AllowNotFound
+    if ($repository) {
+        $null = Invoke-BoundedAz `
+            -Arguments @(
+                'acr', 'repository', 'delete',
+                '--name', $Binding.ContainerRegistry,
+                '--repository', $Names.AzureRepository,
+                '--yes',
+                '--only-show-errors'
+            ) `
+            -TimeoutSeconds 120 `
+            -Raw
+    }
+    $remainingRepository = Invoke-BoundedAz `
+        -Arguments @(
+            'acr', 'repository', 'show',
+            '--name', $Binding.ContainerRegistry,
+            '--repository', $Names.AzureRepository,
+            '--only-show-errors',
+            '--output', 'json'
+        ) `
+        -TimeoutSeconds 60 `
+        -AllowNotFound
+    if ($remainingRepository) {
+        throw 'The experiment ACR repository path still contains manifests.'
+    }
+}
+
 if ($binding.CleanupWriteApproval -ne 'approved') {
     throw 'The ignored binding does not approve Gate 2 cleanup.'
 }
@@ -51,11 +94,33 @@ if (
             throw 'The soft-deleted Key Vault secret does not match state.'
         }
         Write-Output '{"gate2Cleanup":"pending-platform-purge"}'
+    }
+    else {
+        $state.Remove('gate2')
+        Save-ExperimentState -Path $statePath -State $state
+        Write-Output '{"gate2Cleanup":"complete"}'
         exit 0
     }
-    $state.Remove('gate2')
-    Save-ExperimentState -Path $statePath -State $state
-    Write-Output '{"gate2Cleanup":"complete"}'
+    if ($gate2['acrRepositoryOwned']) {
+        Remove-ExperimentAcrRepository -Binding $binding -Names $names
+        $gate2.Remove('acrRepositoryOwned')
+        Save-ExperimentState -Path $statePath -State $state
+    }
+    $allowedPendingKeys = @(
+        'runtimeDetached',
+        'siteId',
+        'azureSecretId',
+        'azureSecretSoftDeleted',
+        'azureSecretScheduledPurgeDate'
+    )
+    $unexpectedPendingKeys = @(
+        $gate2.Keys |
+            Where-Object { $_ -notin $allowedPendingKeys }
+    )
+    if ($unexpectedPendingKeys.Count -gt 0) {
+        throw 'Gate 2 state contains unfinished late cleanup keys.'
+    }
+    Write-Output '{"gate2Cleanup":"pending-platform-purge"}'
     exit 0
 }
 if (-not $state.ContainsKey('entra') -or -not $state.ContainsKey('aws')) {
@@ -675,6 +740,12 @@ if ($gate2['image']) {
     }
     $gate2.Remove('image')
     $gate2.Remove('acrLoginServer')
+    Save-ExperimentState -Path $statePath -State $state
+}
+
+if ($gate2['acrRepositoryOwned']) {
+    Remove-ExperimentAcrRepository -Binding $binding -Names $names
+    $gate2.Remove('acrRepositoryOwned')
     Save-ExperimentState -Path $statePath -State $state
 }
 

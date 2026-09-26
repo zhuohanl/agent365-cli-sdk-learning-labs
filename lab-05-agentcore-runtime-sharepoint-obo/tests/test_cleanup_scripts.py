@@ -30,6 +30,7 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     assert "if ($pendingAppRoles.Count -gt 0)" in gate2
     assert "pending-platform-purge" in gate2
     assert "[string]$deletedSecret.id" in gate2
+    assert "acrRepositoryOwned" in gate2
     assert "does not exist" in cleanup
     assert "azureSecretSoftDeleted" in gate1_identity
     assert "ContainsKey('ExpectedName')" in gate1_identity

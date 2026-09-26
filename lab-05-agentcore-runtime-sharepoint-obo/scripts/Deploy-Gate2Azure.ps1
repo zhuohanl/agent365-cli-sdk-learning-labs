@@ -247,6 +247,7 @@ $app = az containerapp show `
     --only-show-errors `
     --output json | ConvertFrom-Json
 $gate2['image'] = $image
+$gate2['acrRepositoryOwned'] = $true
 $gate2['fqdn'] = [string]$app.properties.configuration.ingress.fqdn
 $gate2['mcpUrl'] = "https://$($gate2['fqdn'])/mcp"
 Save-ExperimentState -Path $statePath -State $state

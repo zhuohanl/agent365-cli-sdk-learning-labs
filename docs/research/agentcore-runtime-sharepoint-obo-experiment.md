@@ -574,7 +574,8 @@ pwsh -NoProfile -File .\scripts\Remove-Experiment.ps1 `
 The orchestrator first detaches the Runtime from the MCP endpoint and AWS
 secret, restores the previous Blueprint Graph declaration and delegated
 consent, and removes the owned site grant, inheritance, FIC, role assignments,
-Container App, secrets, and MCP image. It then removes the owned AWS stack,
+Container App, secrets, and all manifests in the experiment-only MCP
+repository path. It then removes the owned AWS stack,
 Runtime logs, and Entra identities. Every mutation has a bounded timeout and
 live-state verification. A failure preserves the unfinished state key for a
 safe retry; completion is reported only after the final verifier confirms the

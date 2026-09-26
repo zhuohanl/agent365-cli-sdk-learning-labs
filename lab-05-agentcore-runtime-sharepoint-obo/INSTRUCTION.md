@@ -385,7 +385,7 @@ Cleanup removes owned objects in dependency order:
 3. restore the previous Blueprint Graph declaration and delegated grant;
 4. remove both experiment managed-identity Graph app-role assignments;
 5. remove the owned Azure role assignments, Container App, transport secrets,
-   and exact MCP image;
+   and all manifests under the experiment-only MCP repository path;
 6. delete the experiment Runtime stack and wait for its service-created
    children;
 7. delete only the experiment Runtime log groups;
