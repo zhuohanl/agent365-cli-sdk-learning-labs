@@ -45,7 +45,7 @@ if (
         -AllowNotFound
     if ($deletedSecret) {
         if (
-            [string]$deletedSecret.kid -ne
+            [string]$deletedSecret.id -ne
                 [string]$gate2['azureSecretId']
         ) {
             throw 'The soft-deleted Key Vault secret does not match state.'
@@ -541,7 +541,7 @@ if ($gate2['azureSecretId']) {
             ) `
             -TimeoutSeconds 60
         if (
-            [string]$deletedSecret.kid -ne
+            [string]$deletedSecret.id -ne
                 [string]$gate2['azureSecretId']
         ) {
             throw 'The soft-deleted Key Vault secret does not match state.'

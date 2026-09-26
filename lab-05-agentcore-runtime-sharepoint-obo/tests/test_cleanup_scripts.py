@@ -19,6 +19,7 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     assert '"$blueprintUri?' not in gate2
     assert "if ($pendingAppRoles.Count -gt 0)" in gate2
     assert "pending-platform-purge" in gate2
+    assert "[string]$deletedSecret.id" in gate2
 
 
 def load_stop_module() -> ModuleType:
