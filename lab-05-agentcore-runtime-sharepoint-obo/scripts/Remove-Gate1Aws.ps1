@@ -50,26 +50,9 @@ if ($stack) {
     }
 }
 
-$runtimeArn = [string]$awsState['runtimeArn']
-if ($runtimeArn -and $state.ContainsKey('sessions')) {
-    foreach ($sessionId in $state['sessions'].Values) {
-        if (-not $sessionId) {
-            continue
-        }
-        $null = Invoke-BoundedAws `
-            -Arguments @(
-                'bedrock-agentcore', 'stop-runtime-session',
-                '--agent-runtime-arn', $runtimeArn,
-                '--runtime-session-id', [string]$sessionId,
-                '--qualifier', 'DEFAULT',
-                '--output', 'json'
-            ) `
-            -Profile $binding.AwsProfile `
-            -Region $binding.AwsRegion `
-            -TimeoutSeconds 60 `
-            -AllowNotFound
-    }
-}
+& (Join-Path $PSScriptRoot 'Stop-RuntimeSessions.ps1') `
+    -BindingPath $BindingPath `
+    -TimeoutSeconds ([Math]::Min($TimeoutSeconds, 600))
 
 $repositoryName = [string]$awsState['repositoryName']
 if ($repositoryName -ne $names.Repository) {
@@ -208,8 +191,5 @@ if ($runtimeId) {
 }
 
 $state.Remove('aws')
-if ($state.ContainsKey('sessions')) {
-    $state.Remove('sessions')
-}
 Save-ExperimentState -Path $statePath -State $state
 Write-Output '{"awsCleanup":"complete"}'

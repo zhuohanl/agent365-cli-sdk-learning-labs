@@ -362,6 +362,7 @@ it is not converted into a denial.
 | `scripts/Cleanup.ps1` | Run bounded Graph and Azure requests and verify deletion or restoration against live state. |
 | `scripts/Get-WritePlan.ps1` | Print the public-safe mutation sequence, stop conditions, and cleanup order without cloud calls. |
 | `scripts/Remove-Experiment.ps1` | Run Gate 2, AWS, and Entra cleanup in dependency order, stopping on the first failure. |
+| `scripts/Stop-RuntimeSessions.ps1` | Stop tracked OAuth/JWT Runtime sessions through bounded bearer-authenticated HTTPS and retain state on failure. |
 | `scripts/Test-CleanupResult.ps1` | Prove experiment-owned resources are absent, shared Azure baselines remain, and the SharePoint proof files still exist. |
 | `scripts/Test-Local.ps1` | Restore dependencies, run tests, syntax-check clients, and build both architecture-specific images. |
 

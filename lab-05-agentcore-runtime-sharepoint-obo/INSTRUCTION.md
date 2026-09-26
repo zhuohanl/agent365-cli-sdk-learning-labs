@@ -367,6 +367,11 @@ removing its state key. It preserves the shared Container Apps environment,
 registry, monitoring workspace, Key Vault, resource groups, SharePoint
 content, labels, policies, and user permissions.
 
+Because the Runtime uses OAuth/JWT inbound authorization, tracked Runtime
+sessions are stopped through bounded bearer-authenticated HTTPS rather than
+the SigV4 AWS CLI operation. The cleanup opens the approved public-client
+interactive sign-in only when tracked sessions remain.
+
 Cleanup removes owned objects in dependency order:
 
 1. stop active proof sessions;

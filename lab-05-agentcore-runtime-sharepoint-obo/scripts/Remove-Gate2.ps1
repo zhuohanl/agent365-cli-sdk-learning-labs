@@ -71,34 +71,18 @@ if (-not $context -or $context.TenantId -ne $binding.TenantId) {
     throw 'The Microsoft Graph context does not match the binding.'
 }
 
-if (-not $gate2.ContainsKey('runtimeDetached')) {
-    $gate2['runtimeDetached'] = $true
-    Save-ExperimentState -Path $statePath -State $state
-}
+& (Join-Path $PSScriptRoot 'Stop-RuntimeSessions.ps1') `
+    -BindingPath $BindingPath `
+    -TimeoutSeconds ([Math]::Min($TimeoutSeconds, 600))
+
 & (Join-Path $PSScriptRoot 'Deploy-Gate1.ps1') `
     -BindingPath $BindingPath `
     -TimeoutSeconds $TimeoutSeconds
 $state = Read-ExperimentState -Path $statePath
 $gate2 = $state['gate2']
-
-if ($state.ContainsKey('gate2Sessions') -and $state['aws']['runtimeArn']) {
-    foreach ($sessionId in $state['gate2Sessions'].Values) {
-        if (-not $sessionId) {
-            continue
-        }
-        $null = Invoke-BoundedAws `
-            -Arguments @(
-                'bedrock-agentcore', 'stop-runtime-session',
-                '--agent-runtime-arn', [string]$state['aws']['runtimeArn'],
-                '--runtime-session-id', [string]$sessionId,
-                '--qualifier', 'DEFAULT',
-                '--output', 'json'
-            ) `
-            -Profile $binding.AwsProfile `
-            -Region $binding.AwsRegion `
-            -TimeoutSeconds 60 `
-            -AllowNotFound
-    }
+if (-not $gate2.ContainsKey('runtimeDetached')) {
+    $gate2['runtimeDetached'] = $true
+    Save-ExperimentState -Path $statePath -State $state
 }
 
 if ($gate2['sitePermissionId'] -and $gate2['siteId']) {
@@ -623,9 +607,6 @@ if ($remainingKeys.Count -gt 0) {
     throw 'Gate 2 cleanup is incomplete; ignored state retains unfinished keys.'
 }
 $state.Remove('gate2')
-if ($state.ContainsKey('gate2Sessions')) {
-    $state.Remove('gate2Sessions')
-}
 Save-ExperimentState -Path $statePath -State $state
 Remove-Item `
     -LiteralPath (Join-Path $labRoot 'gate2.containerapp.local.yaml') `
