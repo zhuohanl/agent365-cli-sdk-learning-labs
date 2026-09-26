@@ -18,6 +18,9 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
         encoding="utf-8"
     )
     cleanup = (SCRIPTS / "Cleanup.ps1").read_text(encoding="utf-8")
+    cleanup_result = (SCRIPTS / "Test-CleanupResult.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert "stop-runtime-session" not in gate2
     assert "stop-runtime-session" not in gate1_aws
@@ -31,6 +34,7 @@ def test_cleanup_uses_oauth_for_runtime_sessions() -> None:
     assert "azureSecretSoftDeleted" in gate1_identity
     assert "ContainsKey('ExpectedName')" in gate1_identity
     assert "Min($TimeoutSeconds, 300)" in orchestrator
+    assert "deletableExperimentResourcesAbsent" in cleanup_result
 
 
 def load_stop_module() -> ModuleType:

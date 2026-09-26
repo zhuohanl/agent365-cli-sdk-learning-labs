@@ -13,16 +13,29 @@ $ErrorActionPreference = 'Stop'
 $binding = Get-GateBinding -Path $BindingPath
 $names = Get-ExperimentNames
 $state = Read-ExperimentState -Path (Get-StatePath -BindingPath $BindingPath)
+$platformPurgePending = $false
 foreach ($section in @('gate2', 'gate2Sessions', 'aws', 'sessions', 'entra')) {
     if ($state.ContainsKey($section)) {
         if (
             $section -eq 'gate2' -and
             $state['gate2']['azureSecretSoftDeleted'] -eq $true
         ) {
-            throw (
-                'The experiment Key Vault secret remains soft-deleted ' +
-                'under shared purge protection.'
+            $allowedGate2Keys = @(
+                'runtimeDetached',
+                'siteId',
+                'azureSecretId',
+                'azureSecretSoftDeleted',
+                'azureSecretScheduledPurgeDate'
             )
+            $unexpectedKeys = @(
+                $state['gate2'].Keys |
+                    Where-Object { $_ -notin $allowedGate2Keys }
+            )
+            if ($unexpectedKeys.Count -gt 0) {
+                throw 'Gate 2 state contains unfinished non-platform cleanup.'
+            }
+            $platformPurgePending = $true
+            continue
         }
         throw "Cleanup state still contains the $section section."
     }
@@ -216,7 +229,14 @@ foreach ($query in @(
     $result = Invoke-BoundedGraph `
         -Method GET `
         -Uri $query.Uri `
-        -Headers $(if ($query.Headers) { $query.Headers } else { @{} }) `
+        -Headers $(
+            if ($query.ContainsKey('Headers')) {
+                $query.Headers
+            }
+            else {
+                @{}
+            }
+        ) `
         -TimeoutSeconds ([Math]::Min($TimeoutSeconds, 120)) `
         -ExpectedStatus @(200)
     if (@($result.value).Count -ne 0) {
@@ -271,6 +291,19 @@ foreach ($expectedFile in @(
     if ($expectedFile -notin $actualFiles) {
         throw 'An approved SharePoint proof file is missing after cleanup.'
     }
+}
+
+if ($platformPurgePending) {
+    Write-Output (@{
+            cleanup = 'pending-platform-purge'
+            deletableExperimentResourcesAbsent = $true
+            sharedAzureBaselinesPresent = $true
+            sharePointProofFilesPresent = $true
+        } | ConvertTo-Json -Compress)
+    throw (
+        'The experiment Key Vault secret remains soft-deleted under ' +
+        'shared purge protection.'
+    )
 }
 
 Write-Output (@{
