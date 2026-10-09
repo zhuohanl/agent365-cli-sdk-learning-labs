@@ -157,7 +157,7 @@ tracked Markdown, chat, an issue, or a screenshot.
 The add-companion demo requires only the selected source before it starts:
 
 ```dotenv
-A365_DEMO_TARGET_NAME=<exact-GCP-package-display-name>
+A365_DEMO_TARGET_NAME=<exact-GCP-or-AWS-package-display-name>
 ```
 
 The target name is the operator's inventory selection. After reading Package
@@ -168,9 +168,16 @@ mapping. The operator does not supply those values, and they must not be
 treated as external governance approval. The helper does not infer a shared
 group from provider metadata or the Package display name.
 
-Before starting the Add demo, choose the target GCP agent and put its exact
-Package `displayName` in `A365_DEMO_TARGET_NAME` in the ignored Lab 20 `.env`.
-Copy spaces and capitalization exactly.
+Before starting the Add demo, choose the target Google Vertex AI or AWS Bedrock
+agent and put its exact Package `displayName` in `A365_DEMO_TARGET_NAME` in the
+ignored Lab 20 `.env`. Copy spaces and capitalization exactly. The helper
+detects the canonical `GoogleVertexAI` or `AwsBedrock` platform value from the
+saved Package response.
+
+When selecting a different source, archive the previous private evidence and
+mapping and clear the generated `A365_DEMO_*` values before setting the new
+target name. Restore `A365_DEMO_BLUEPRINT_OBJECT_ID` only after protected
+mapping confirms the exact generated group is already bound to that Blueprint.
 
 After the helper generates `A365_DEMO_BLUEPRINT_GROUP`, reconcile that exact
 assignment against protected local mapping. Set
@@ -183,13 +190,14 @@ per-agent object is created.
 Follow
 [`demos/01-add-companion/demo.http`](../demos/01-add-companion/demo.http) and use
 its `prepare_demo.py` helper after saving the Package List and Package Details
-responses under ignored evidence. The helper selects exactly one matching GCP
-Package, preserves the encoded provider source ID, extracts the required source
-timestamps, and generates the dedicated assignment. After Registration create,
-its `registration` command produces the path-safe ID required for readback.
-Its `finalize` command validates and saves the durable assignment, Blueprint,
-Identity, Registration, Package, source, and initial display-name state for
-the rename and delete demos.
+responses under ignored evidence. The helper selects exactly one matching
+Google Vertex AI or AWS Bedrock Package, preserves the provider source ID,
+extracts the required source timestamps, and generates the provider-specific
+companion source ID and dedicated assignment. After Registration create, its
+`registration` command produces the path-safe ID required for readback. Its
+`finalize` command validates and saves the durable assignment, Blueprint,
+Identity, Registration, Package, source, platform, and initial display-name
+state for the rename and delete demos.
 
 Demo 02 uses `demos/02-rename-companion/prepare_rename.py` after each verified
 GET. The helper preserves every identity relationship and records the Package,

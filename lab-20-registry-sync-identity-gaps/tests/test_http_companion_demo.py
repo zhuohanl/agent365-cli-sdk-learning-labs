@@ -538,9 +538,11 @@ class HttpCompanionDemoTests(unittest.TestCase):
             self.text,
         )
         self.assertIn(
-            "A365_DEMO_TARGET_NAME=<exact displayName of the selected GCP agent>",
+            "A365_DEMO_TARGET_NAME=<exact displayName of the selected GCP or AWS agent>",
             self.text,
         )
+        self.assertIn("GoogleVertexAI and", self.text)
+        self.assertIn("AwsBedrock", self.text)
         self.assertIn(
             "If there is no @odata.nextLink, run:",
             self.text,
@@ -587,11 +589,12 @@ class HttpCompanionDemoTests(unittest.TestCase):
 
     def test_create_uses_deterministic_companion_source(self):
         self.assertIn(
-            '"sourceAgentId": "agent-governance:companion:v1:gcp:{{providerSourceAgentId}}"',
+            '"sourceAgentId": "{{companionSourceAgentId}}"',
             self.text,
         )
         create_block = named_blocks(self.text)["demoCreateFreshCompanion"]
         self.assertNotIn("committed-fleet:companion", create_block)
+        self.assertIn('"originatingStore": "{{targetPlatform}}"', create_block)
         self.assertIn(
             '"agentIdentityBlueprintId": "{{blueprintAppId}}"',
             create_block,
@@ -617,12 +620,14 @@ class HttpCompanionDemoTests(unittest.TestCase):
             "A365_DEMO_BLUEPRINT_GROUP=",
             "A365_DEMO_GROUPING_POLICY_VERSION=",
             "A365_DEMO_APPROVAL_REFERENCE=",
+            "A365_DEMO_TARGET_PLATFORM=",
             "A365_DEMO_ORIGINAL_PACKAGE_ID=",
             "A365_DEMO_PROVIDER_SOURCE_AGENT_ID=",
             "A365_DEMO_SOURCE_CREATED_AT=",
             "A365_DEMO_SOURCE_MODIFIED_AT=",
             "A365_DEMO_BLUEPRINT_APP_ID=",
             "A365_DEMO_AGENT_IDENTITY_ID=",
+            "A365_DEMO_COMPANION_SOURCE_AGENT_ID=",
             "A365_DEMO_COMPANION_REGISTRATION_ID=",
         ):
             self.assertNotIn(generated, header)

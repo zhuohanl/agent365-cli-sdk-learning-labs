@@ -17,8 +17,10 @@ from urllib.parse import quote
 LAB = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = LAB / ".env"
 DEFAULT_EVIDENCE = LAB / "evidence" / "demos" / "01-add-companion"
-PLATFORM = "GoogleVertexAI"
-COMPANION_PREFIX = "agent-governance:companion:v1:gcp:"
+PROVIDER_NAMESPACES = {
+    "GoogleVertexAI": "gcp",
+    "AwsBedrock": "aws",
+}
 ASSIGNMENT_MODE = "dedicated"
 LAB_GROUPING_POLICY_VERSION = "lab-20-dedicated-default-v1"
 LAB_APPROVAL_REFERENCE = "lab-20-disposable-demo-gate"
@@ -102,6 +104,20 @@ def package_platform_counts(
     return counts
 
 
+def provider_namespace(platform: Any) -> str:
+    if not isinstance(platform, str) or platform not in PROVIDER_NAMESPACES:
+        supported = ", ".join(sorted(PROVIDER_NAMESPACES))
+        raise ValueError(
+            f"Unsupported Package platform {platform!r}; supported: {supported}"
+        )
+    return PROVIDER_NAMESPACES[platform]
+
+
+def companion_source_id(platform: str, provider_source: str) -> str:
+    namespace = provider_namespace(platform)
+    return f"agent-governance:companion:v1:{namespace}:{provider_source}"
+
+
 def package_values(
     package_lists: list[dict[str, Any]], target_name: str
 ) -> dict[str, str]:
@@ -109,24 +125,41 @@ def package_values(
         package
         for package in package_entries(package_lists)
         if package.get("displayName") == target_name
-        and package.get("platform") == PLATFORM
+        and package.get("platform") in PROVIDER_NAMESPACES
     ]
     if len(matches) != 1:
+        matching_platforms = sorted(
+            {
+                str(package.get("platform"))
+                for package in package_entries(package_lists)
+                if package.get("displayName") == target_name
+            }
+        )
+        detail = (
+            f"; matching platforms: {', '.join(matching_platforms)}"
+            if matching_platforms
+            else ""
+        )
         raise ValueError(
-            f"Expected exactly one {PLATFORM} Package named {target_name!r}; "
-            f"found {len(matches)}"
+            f"Expected exactly one supported Package named {target_name!r}; "
+            f"found {len(matches)}{detail}"
         )
     package_id = matches[0].get("id")
     if not isinstance(package_id, str) or not package_id:
         raise ValueError("Selected Package has no id")
-    return {"A365_DEMO_ORIGINAL_PACKAGE_ID": package_id}
+    platform = matches[0].get("platform")
+    provider_namespace(platform)
+    return {
+        "A365_DEMO_ORIGINAL_PACKAGE_ID": package_id,
+        "A365_DEMO_TARGET_PLATFORM": platform,
+    }
 
 
 def source_values(package: dict[str, Any], target_name: str) -> dict[str, str]:
     if package.get("displayName") != target_name:
         raise ValueError("Package Details displayName does not match A365_DEMO_TARGET_NAME")
-    if package.get("platform") != PLATFORM:
-        raise ValueError(f"Selected Package is not from {PLATFORM}")
+    platform = package.get("platform")
+    provider_namespace(platform)
     if package.get("agentIdentityId"):
         raise ValueError("Original Registry Sync Package already has an Agent Identity")
 
@@ -148,13 +181,13 @@ def source_values(package: dict[str, Any], target_name: str) -> dict[str, str]:
             if (
                 isinstance(source_ids, dict)
                 and source_ids.get("mac.agentRegistrationType") == "ConnectedPlatform"
-                and source_ids.get("mac.agentRegistrationProviderType") == PLATFORM
+                and source_ids.get("mac.agentRegistrationProviderType") == platform
             ):
                 definitions.append(definition)
 
     if len(definitions) != 1:
         raise ValueError(
-            f"Expected exactly one Connected Platform {PLATFORM} definition; "
+            f"Expected exactly one Connected Platform {platform} definition; "
             f"found {len(definitions)}"
         )
 
@@ -164,7 +197,10 @@ def source_values(package: dict[str, Any], target_name: str) -> dict[str, str]:
         "A365_DEMO_SOURCE_CREATED_AT": "CreatedDateTime",
         "A365_DEMO_SOURCE_MODIFIED_AT": "LastModifiedDateTime",
     }
-    values = {"A365_DEMO_ORIGINAL_PACKAGE_ID": package.get("id")}
+    values = {
+        "A365_DEMO_ORIGINAL_PACKAGE_ID": package.get("id"),
+        "A365_DEMO_TARGET_PLATFORM": platform,
+    }
     for env_key, source_key in required.items():
         value = definition.get(source_key)
         if not isinstance(value, str) or not value:
@@ -172,19 +208,28 @@ def source_values(package: dict[str, Any], target_name: str) -> dict[str, str]:
         values[env_key] = value
     if not isinstance(values["A365_DEMO_ORIGINAL_PACKAGE_ID"], str):
         raise ValueError("Package Details has no id")
+    values["A365_DEMO_COMPANION_SOURCE_AGENT_ID"] = companion_source_id(
+        platform, values["A365_DEMO_PROVIDER_SOURCE_AGENT_ID"]
+    )
     return values
 
 
-def assignment_values(env: dict[str, str], provider_source: str) -> dict[str, str]:
+def assignment_values(
+    env: dict[str, str],
+    provider_source: str,
+    platform: str | None = None,
+) -> dict[str, str]:
     tenant_id = env.get("A365_TENANT_ID", "")
     if not tenant_id:
         raise ValueError("Set A365_TENANT_ID before preparing the assignment")
+    resolved_platform = platform or env.get("A365_DEMO_TARGET_PLATFORM", "")
+    namespace = provider_namespace(resolved_platform)
 
-    canonical_key = f"{tenant_id}|{PLATFORM}|{provider_source}"
+    canonical_key = f"{tenant_id}|{resolved_platform}|{provider_source}"
     digest = hashlib.sha256(canonical_key.encode("utf-8")).hexdigest()[:16]
     return {
         "A365_DEMO_ASSIGNMENT_MODE": ASSIGNMENT_MODE,
-        "A365_DEMO_BLUEPRINT_GROUP": f"dedicated-gcp-{digest}",
+        "A365_DEMO_BLUEPRINT_GROUP": f"dedicated-{namespace}-{digest}",
         "A365_DEMO_GROUPING_POLICY_VERSION": LAB_GROUPING_POLICY_VERSION,
         "A365_DEMO_APPROVAL_REFERENCE": LAB_APPROVAL_REFERENCE,
     }
@@ -210,7 +255,9 @@ def blueprint_values(
 
 
 def registration_values(
-    registration: dict[str, Any], provider_source: str
+    registration: dict[str, Any],
+    provider_source: str,
+    platform: str,
 ) -> dict[str, str]:
     registration_id = registration.get("id")
     source_agent_id = registration.get("sourceAgentId")
@@ -223,7 +270,7 @@ def registration_values(
         ),
     }
     if source_agent_id is not None:
-        expected_source = COMPANION_PREFIX + provider_source
+        expected_source = companion_source_id(platform, provider_source)
         if source_agent_id != expected_source:
             raise ValueError("Registration source does not match the selected Package")
         values["A365_DEMO_COMPANION_SOURCE_AGENT_ID"] = source_agent_id
@@ -245,6 +292,9 @@ def mapping_values(
     registration_id = registration.get("id")
     companion_package_id = companion_package.get("id")
     provider_source = env.get("A365_DEMO_PROVIDER_SOURCE_AGENT_ID", "")
+    platform = env.get("A365_DEMO_TARGET_PLATFORM", "")
+    provider_namespace(platform)
+    expected_companion_source = companion_source_id(platform, provider_source)
     expected_assignment = assignment_values(env, provider_source)
 
     if (
@@ -267,10 +317,10 @@ def mapping_values(
         raise ValueError("Agent Identity does not belong to the selected Blueprint")
     if not registration_id:
         raise ValueError("Registration response has no id")
-    if registration.get("sourceAgentId") != COMPANION_PREFIX + provider_source:
+    if registration.get("sourceAgentId") != expected_companion_source:
         raise ValueError("Registration has an unexpected companion sourceAgentId")
-    if registration.get("originatingStore") != PLATFORM:
-        raise ValueError(f"Registration originatingStore is not {PLATFORM}")
+    if registration.get("originatingStore") != platform:
+        raise ValueError(f"Registration originatingStore is not {platform}")
     if (
         registration.get("agentIdentityBlueprintId") != blueprint_app_id
         or registration.get("agentIdentityId") != identity_id
@@ -279,7 +329,7 @@ def mapping_values(
     if (
         not companion_package_id
         or companion_package_id != env.get("A365_DEMO_COMPANION_PACKAGE_ID")
-        or companion_package.get("platform") != PLATFORM
+        or companion_package.get("platform") != platform
         or companion_package.get("agentIdentityId") != identity_id
     ):
         raise ValueError("Companion Package does not match the mapped identity")
@@ -351,7 +401,7 @@ def mapping_values(
         raise ValueError("Created object display names do not match the naming policy")
 
     return {
-        "platform": PLATFORM,
+        "platform": platform,
         "assignmentMode": env["A365_DEMO_ASSIGNMENT_MODE"],
         "blueprintGroup": env["A365_DEMO_BLUEPRINT_GROUP"],
         "groupingPolicyVersion": env["A365_DEMO_GROUPING_POLICY_VERSION"],
@@ -388,7 +438,10 @@ def select_command(args: argparse.Namespace) -> None:
     print(f"Observed Package counts by platform: {summary or 'none'}")
     updates = package_values(pages, target_name)
     update_env(args.env, updates)
-    print("Updated A365_DEMO_ORIGINAL_PACKAGE_ID in the ignored .env")
+    print(
+        "Updated A365_DEMO_ORIGINAL_PACKAGE_ID and "
+        "A365_DEMO_TARGET_PLATFORM in the ignored .env"
+    )
 
 
 def prepare_command(args: argparse.Namespace) -> None:
@@ -398,7 +451,11 @@ def prepare_command(args: argparse.Namespace) -> None:
         raise ValueError("Set A365_DEMO_TARGET_NAME before running prepare")
     updates = source_values(load_json(args.package_details), target_name)
     updates.update(
-        assignment_values(env, updates["A365_DEMO_PROVIDER_SOURCE_AGENT_ID"])
+        assignment_values(
+            env,
+            updates["A365_DEMO_PROVIDER_SOURCE_AGENT_ID"],
+            updates["A365_DEMO_TARGET_PLATFORM"],
+        )
     )
     update_env(args.env, updates)
     print(
@@ -436,7 +493,12 @@ def registration_command(args: argparse.Namespace) -> None:
     provider_source = env.get("A365_DEMO_PROVIDER_SOURCE_AGENT_ID", "")
     if not provider_source:
         raise ValueError("Prepare the selected Package before the Registration")
-    updates = registration_values(load_json(args.registration), provider_source)
+    platform = env.get("A365_DEMO_TARGET_PLATFORM", "")
+    updates = registration_values(
+        load_json(args.registration),
+        provider_source,
+        platform,
+    )
     update_env(args.env, updates)
     if "A365_DEMO_COMPANION_SOURCE_AGENT_ID" in updates:
         print(
@@ -454,6 +516,7 @@ def finalize_command(args: argparse.Namespace) -> None:
     env = read_env(args.env)
     required_env = (
         "A365_DEMO_TARGET_NAME",
+        "A365_DEMO_TARGET_PLATFORM",
         "A365_DEMO_ORIGINAL_PACKAGE_ID",
         "A365_DEMO_PROVIDER_SOURCE_AGENT_ID",
         "A365_DEMO_ASSIGNMENT_MODE",

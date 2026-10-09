@@ -30,27 +30,36 @@ class DemoPreparationTests(unittest.TestCase):
         self.identity_id = "00000000-0000-4000-8000-000000000003"
         self.registration_id = "fixture-registration"
 
-    def package(self):
+    def package(
+        self,
+        platform="GoogleVertexAI",
+        target=None,
+        package_id=None,
+        source=None,
+    ):
+        target = target or self.target
+        package_id = package_id or self.package_id
+        source = source or self.source
         definition = {
             "SourceIds": {
                 "mac.agentRegistrationType": "ConnectedPlatform",
-                "mac.agentRegistrationProviderType": "GoogleVertexAI",
+                "mac.agentRegistrationProviderType": platform,
             },
-            "SourceAgentId": self.source,
+            "SourceAgentId": source,
             "CreatedDateTime": self.created,
             "LastModifiedDateTime": self.modified,
         }
         return {
-            "id": self.package_id,
-            "displayName": self.target,
-            "platform": "GoogleVertexAI",
+            "id": package_id,
+            "displayName": target,
+            "platform": platform,
             "agentIdentityId": None,
             "elementDetails": [
                 {"elements": [{"definition": json.dumps(definition)}]}
             ],
         }
 
-    def test_select_requires_one_exact_gcp_name_match_across_pages(self):
+    def test_select_requires_one_exact_supported_name_match_across_pages(self):
         pages = [
             {
                 "value": [
@@ -65,7 +74,34 @@ class DemoPreparationTests(unittest.TestCase):
         ]
         self.assertEqual(
             prepare_demo.package_values(pages, self.target),
-            {"A365_DEMO_ORIGINAL_PACKAGE_ID": self.package_id},
+            {
+                "A365_DEMO_ORIGINAL_PACKAGE_ID": self.package_id,
+                "A365_DEMO_TARGET_PLATFORM": "GoogleVertexAI",
+            },
+        )
+
+    def test_select_and_prepare_support_aws_bedrock(self):
+        target = "Selected AWS Agent"
+        source = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/example"
+        package = self.package(
+            platform="AwsBedrock",
+            target=target,
+            package_id="aws-package",
+            source=source,
+        )
+        self.assertEqual(
+            prepare_demo.package_values([{"value": [package]}], target),
+            {
+                "A365_DEMO_ORIGINAL_PACKAGE_ID": "aws-package",
+                "A365_DEMO_TARGET_PLATFORM": "AwsBedrock",
+            },
+        )
+        values = prepare_demo.source_values(package, target)
+        self.assertEqual(values["A365_DEMO_TARGET_PLATFORM"], "AwsBedrock")
+        self.assertEqual(values["A365_DEMO_PROVIDER_SOURCE_AGENT_ID"], source)
+        self.assertEqual(
+            values["A365_DEMO_COMPANION_SOURCE_AGENT_ID"],
+            f"agent-governance:companion:v1:aws:{source}",
         )
 
     def test_discovery_counts_packages_by_returned_platform(self):
@@ -95,9 +131,16 @@ class DemoPreparationTests(unittest.TestCase):
         self.assertEqual(values["A365_DEMO_PROVIDER_SOURCE_AGENT_ID"], self.source)
         self.assertEqual(values["A365_DEMO_SOURCE_CREATED_AT"], self.created)
         self.assertEqual(values["A365_DEMO_SOURCE_MODIFIED_AT"], self.modified)
+        self.assertEqual(
+            values["A365_DEMO_COMPANION_SOURCE_AGENT_ID"],
+            prepare_demo.companion_source_id("GoogleVertexAI", self.source),
+        )
 
     def test_dedicated_assignment_is_stable_and_source_scoped(self):
-        env = {"A365_TENANT_ID": "fixture-tenant"}
+        env = {
+            "A365_TENANT_ID": "fixture-tenant",
+            "A365_DEMO_TARGET_PLATFORM": "GoogleVertexAI",
+        }
         first = prepare_demo.assignment_values(env, self.source)
         second = prepare_demo.assignment_values(env, self.source)
         other = prepare_demo.assignment_values(env, self.source + "-other")
@@ -117,6 +160,16 @@ class DemoPreparationTests(unittest.TestCase):
         self.assertNotEqual(
             first["A365_DEMO_BLUEPRINT_GROUP"],
             other["A365_DEMO_BLUEPRINT_GROUP"],
+        )
+
+    def test_dedicated_aws_assignment_uses_aws_namespace(self):
+        env = {
+            "A365_TENANT_ID": "fixture-tenant",
+            "A365_DEMO_TARGET_PLATFORM": "AwsBedrock",
+        }
+        assignment = prepare_demo.assignment_values(env, self.source)
+        self.assertTrue(
+            assignment["A365_DEMO_BLUEPRINT_GROUP"].startswith("dedicated-aws-")
         )
 
     def test_prepare_rejects_package_with_native_identity(self):
@@ -159,6 +212,7 @@ class DemoPreparationTests(unittest.TestCase):
         values = prepare_demo.registration_values(
             {"id": "agent-governance:companion:v1:gcp:projects%2Ffixture"},
             self.source,
+            "GoogleVertexAI",
         )
         self.assertEqual(
             values["A365_DEMO_COMPANION_REGISTRATION_ID"],
@@ -174,19 +228,23 @@ class DemoPreparationTests(unittest.TestCase):
         values = prepare_demo.registration_values(
             {
                 "id": self.registration_id,
-                "sourceAgentId": prepare_demo.COMPANION_PREFIX + self.source,
+                "sourceAgentId": prepare_demo.companion_source_id(
+                    "GoogleVertexAI", self.source
+                ),
             },
             self.source,
+            "GoogleVertexAI",
         )
         self.assertEqual(
             values["A365_DEMO_COMPANION_SOURCE_AGENT_ID"],
-            prepare_demo.COMPANION_PREFIX + self.source,
+            prepare_demo.companion_source_id("GoogleVertexAI", self.source),
         )
 
     def test_finalize_verifies_and_returns_durable_mapping(self):
         env = {
             "A365_TENANT_ID": "fixture-tenant",
             "A365_DEMO_TARGET_NAME": self.target,
+            "A365_DEMO_TARGET_PLATFORM": "GoogleVertexAI",
             "A365_DEMO_ORIGINAL_PACKAGE_ID": self.package_id,
             "A365_DEMO_PROVIDER_SOURCE_AGENT_ID": self.source,
             "A365_DEMO_SOURCE_MODIFIED_AT": self.modified,
@@ -214,14 +272,18 @@ class DemoPreparationTests(unittest.TestCase):
         }
         registration = {
             "id": self.registration_id,
-            "sourceAgentId": prepare_demo.COMPANION_PREFIX + self.source,
+            "sourceAgentId": prepare_demo.companion_source_id(
+                "GoogleVertexAI", self.source
+            ),
             "originatingStore": "GoogleVertexAI",
             "agentIdentityBlueprintId": self.blueprint_app_id,
             "agentIdentityId": self.identity_id,
             "displayName": f"{self.target} - managed companion",
         }
         companion_definition = {
-            "SourceAgentId": prepare_demo.COMPANION_PREFIX + self.source,
+            "SourceAgentId": prepare_demo.companion_source_id(
+                "GoogleVertexAI", self.source
+            ),
             "AgentIdentityBlueprintId": self.blueprint_app_id,
             "AgentIdentityId": self.identity_id,
         }
@@ -257,7 +319,7 @@ class DemoPreparationTests(unittest.TestCase):
         self.assertEqual(mapping["assignmentMode"], "dedicated")
         self.assertEqual(
             mapping["companionSourceAgentId"],
-            prepare_demo.COMPANION_PREFIX + self.source,
+            prepare_demo.companion_source_id("GoogleVertexAI", self.source),
         )
         self.assertEqual(
             mapping["companionPackageId"],
